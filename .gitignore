@@ -1,0 +1,6 @@
+# Ignore .venv directory
+.venv/
+
+# Ignore other files or directories
+*.log
+__pycache__/
