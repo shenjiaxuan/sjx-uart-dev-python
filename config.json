@@ -1,0 +1,127 @@
+{
+    "?Asset": [
+        {
+            "MfrName": "Leopard",
+            "ModelNumber": "IMX501_EV1",
+            "SerialNumber": "1A325G32",
+            "MfgDate": "20240103",
+            "FWVersion": "1.0.0",
+            "HWVersion": "1.0.2",
+            "AppNumber": "699"
+        }
+    ],
+    "?Order": [
+        {
+            "PassThAttr": "620,621,622,623,624,625,626,627,628,629,630,631,632,633,634,635,636,637,638,639,640,641,642,643",
+            "ImageAttr": "624,625,626,627,628,629,630,631,632,633,634,635,636,637,638,639,640,641,642,643",
+            "Cam1SetAttr": "620",
+            "Cam2SetAttr": "621",
+            "AIProessAttr": "622,623"
+        }
+    ],
+    "?ERR": [
+        {
+            "Cam1ErrCode": "0",
+            "Cam2ErrCode": "0"
+        }
+    ],
+    "?OBdata": [
+        {
+            "spdunit": "MPH",
+            "incar": 38,
+            "incarspd": 52,
+            "inbus": 7,
+            "inbusspd": 27,
+            "inped": 64,
+            "inpedspd": 5,
+            "incycle": 0,
+            "incyclespd": 0,
+            "intruck": 7,
+            "intruckspd": 60,
+            "outcar": 37,
+            "outcarspd": 94,
+            "outbus": 1,
+            "outbusspd": 45,
+            "outped": 2,
+            "outpedspd": 2,
+            "outcycle": 18,
+            "outcyclespd": 19,
+            "outtruck": 26,
+            "outtruckspd": 78
+        },
+        {
+            "incar": 15,
+            "incarspd": 57,
+            "inbus": 5,
+            "inbusspd": 20,
+            "inped": 91,
+            "inpedspd": 4,
+            "incycle": 0,
+            "incyclespd": 0,
+            "intruck": 10,
+            "intruckspd": 75,
+            "outcar": 39,
+            "outcarspd": 29,
+            "outbus": 1,
+            "outbusspd": 31,
+            "outped": 1,
+            "outpedspd": 5,
+            "outcycle": 12,
+            "outcyclespd": 16,
+            "outtruck": 16,
+            "outtruckspd": 95
+        }
+    ],
+    "?PS1": [
+        {
+            "CameraFPS": "60",
+            "ImageSize": "640*320",
+            "PixelDepth": "RAW10",
+            "PixelOrder": "RGGB",
+            "DNNModel": "TrafficCount20231102",
+            "PostProcessingLogic": "8:00-PostProcessing1,19:00-PostProcessing2",
+            "SendImageQuality": "100",
+            "SendImageSizePercent": "100",
+            "AEModel": "auto",
+            "Exposure": "1120",
+            "Gain": "1",
+            "AWBMode": "enable",
+            "Heating": "enable",
+            "Time": "12/08/2023 14:00:58"
+        }
+    ],
+    "?PS2": [
+        {
+            "CameraFPS": "60",
+            "ImageSize": "640*320",
+            "PixelDepth": "RAW10",
+            "PixelOrder": "RGGB",
+            "DNNModel": "TrafficCount20231102",
+            "PostProcessingLogic": "8:00-PostProcessing1,19:00-PostProcessing2",
+            "SendImageQuality": "100",
+            "SendImageSizePercent": "100",
+            "AEModel": "auto",
+            "Exposure": "1120",
+            "Gain": "1",
+            "AWBMode": "enable",
+            "Heating": "enable",
+            "Time": "12/08/2023 14:00:58"
+        }
+    ],
+    "?PS3": [
+        {
+            "OutcomingRefLine_x1": "100",
+            "OutcomingRefLine_y1": "500",
+            "OutcomingRefLine_x2": "100",
+            "OutcomingRefLine_y2": "200"
+        }
+    ],
+    "?PS4": [
+        {
+            "OutcomingRefLine_x1": "100",
+            "OutcomingRefLine_y1": "500",
+            "OutcomingRefLine_x2": "100",
+            "OutcomingRefLine_y2": "200"
+        }
+    ]
+}
