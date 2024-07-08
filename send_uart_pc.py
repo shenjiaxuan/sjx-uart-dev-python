@@ -1,3 +1,4 @@
+import socket
 import serial
 import base64
 import time
@@ -18,10 +19,6 @@ image_index = 1
 send_time = 0
 str_image = []
 
-def load_camera_info():
-    with open('camera_info.json', 'r') as file:
-        return json.load(file)
-
 def load_config():
     with open('config.json', 'r') as file:
         return json.load(file)
@@ -36,7 +33,7 @@ class UART:
     def __init__(self):
         self.uartport = serial.Serial(
                 # port="/dev/ttyAMA1",
-                port="COM1",  # 修改串口端口为 COM1
+                port="COM1",
                 baudrate=38400,
                 bytesize=serial.EIGHTBITS,
                 parity=serial.PARITY_NONE,
@@ -72,6 +69,15 @@ def update_sim_attribute():
     str_image = []
     for x in range(send_time):
         str_image.append(converted_string[x*send_max_length:(x+1)*send_max_length])
+
+def start_client(command):
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_address = ('localhost', 10045)
+    client_socket.connect(server_address)
+    try:
+        client_socket.sendall(command.encode())
+    finally:
+        client_socket.close()
 
 if __name__ == '__main__':
     uart = UART()
@@ -118,13 +124,14 @@ if __name__ == '__main__':
             elif string[:6] == "REACT|":
                 if string[6:] and int(string[6:]) in range(0, 27):
                     ener_mode = str(string[6:])
+                    start_client(string)
                 response = json.dumps({"EmergencyMode": int(ener_mode)})
                 uart.send_serial(response)
-                # to-do add emergencymode fun
-                # if int(ener_mode) in range(0, 27):
-                #     pass
-                #     ener_mode = "0"
+                if int(ener_mode) in range(0, 27):
+                    pass
+                    ener_mode = "0"
             elif string == "?OBdata":
+                start_client(string)
                 update_sim_attribute()
                 response1 = json.dumps(config["?OBdata"][0])
                 response2 = json.dumps(config["?OBdata"][1])

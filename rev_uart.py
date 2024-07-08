@@ -51,11 +51,8 @@ def append_response_to_file(command, response):
     print(f"Appended response to {filename}")
 
 def save_image(image_data, filename):
-    # Decode the Base64 string to binary image data
     image_binary = base64.b64decode(image_data)
-    # Open the binary data as an image
     image = Image.open(io.BytesIO(image_binary))
-    # Save the image to the specified filename
     image.save(filename, format='BMP')
     print(f"Saved image to {filename}")
 
@@ -124,8 +121,7 @@ if __name__ == '__main__':
             if response:
                 response_str = response.decode("utf_8", "ignore").rstrip()
                 print(time.strftime("%B-%d-%Y %H:%M:%S") + "  <-: {0}".format(response_str))
-                
-                # Check if the response starts with {"Block
+
                 if response_str.startswith('{"Block'):
                     base64_data = extract_base64_data(response_str)
                     if base64_data:
@@ -150,4 +146,4 @@ if __name__ == '__main__':
         combined_image_data = fix_base64_padding(combined_image_data)
         save_image(combined_image_data, "combined_image.bmp")
 
-    time.sleep(1)  # Add a delay between commands to avoid overwhelming the serial port
+    time.sleep(1)
