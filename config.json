@@ -74,8 +74,8 @@
     ],
     "?PS1": [
         {
-            "CameraFPS": "60",
-            "ImageSize": "640*320",
+            "CameraFPS": "30",
+            "ImageSize": "2016*1520",
             "PixelDepth": "RAW10",
             "PixelOrder": "RGGB",
             "DNNModel": "TrafficCount20231102",
@@ -92,8 +92,8 @@
     ],
     "?PS2": [
         {
-            "CameraFPS": "60",
-            "ImageSize": "640*320",
+            "CameraFPS": "30",
+            "ImageSize": "2016*1520",
             "PixelDepth": "RAW10",
             "PixelOrder": "RGGB",
             "DNNModel": "TrafficCount20231102",

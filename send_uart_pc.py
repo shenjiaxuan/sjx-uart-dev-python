@@ -102,6 +102,7 @@ if __name__ == '__main__':
             elif string[:8] == "Profile|":
                 if string[8:] and int(string[8:]) in [0, 1, 2, 3, 16, 17, 18, 19]:
                     profile_index = str(string[8:])
+                    start_client(string)
                 response = json.dumps({"CamProfile": int(profile_index)})
                 uart.send_serial(response)  
             elif string[:5] == "WiFi|":

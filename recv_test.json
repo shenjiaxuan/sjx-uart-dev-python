@@ -29,12 +29,10 @@
             "CamProfile": 1
         }
     ],
-    "WiFi|1": [
+    "?ERR": [
         {
             "WiFiEnable": 1
-        }
-    ],
-    "?ERR": [
+        },
         {
             "Cam1ErrCode": "0",
             "Cam2ErrCode": "0"
@@ -48,54 +46,54 @@
     "?OBdata": [
         {
             "spdunit": "MPH",
-            "incar": 38,
-            "incarspd": 52,
-            "inbus": 7,
-            "inbusspd": 27,
-            "inped": 64,
-            "inpedspd": 5,
+            "incar": 18,
+            "incarspd": 68,
+            "inbus": 3,
+            "inbusspd": 28,
+            "inped": 47,
+            "inpedspd": 8,
             "incycle": 0,
             "incyclespd": 0,
-            "intruck": 7,
-            "intruckspd": 60,
-            "outcar": 37,
-            "outcarspd": 94,
+            "intruck": 14,
+            "intruckspd": 53,
+            "outcar": 15,
+            "outcarspd": 82,
             "outbus": 1,
-            "outbusspd": 45,
+            "outbusspd": 83,
             "outped": 2,
-            "outpedspd": 2,
-            "outcycle": 18,
-            "outcyclespd": 19,
-            "outtruck": 26,
-            "outtruckspd": 78
+            "outpedspd": 7,
+            "outcycle": 20,
+            "outcyclespd": 1,
+            "outtruck": 23,
+            "outtruckspd": 68
         },
         {
-            "incar": 15,
-            "incarspd": 57,
+            "incar": 27,
+            "incarspd": 73,
             "inbus": 5,
-            "inbusspd": 20,
-            "inped": 91,
-            "inpedspd": 4,
+            "inbusspd": 38,
+            "inped": 46,
+            "inpedspd": 6,
             "incycle": 0,
             "incyclespd": 0,
-            "intruck": 10,
-            "intruckspd": 75,
-            "outcar": 39,
-            "outcarspd": 29,
+            "intruck": 2,
+            "intruckspd": 74,
+            "outcar": 12,
+            "outcarspd": 68,
             "outbus": 1,
-            "outbusspd": 31,
+            "outbusspd": 57,
             "outped": 1,
-            "outpedspd": 5,
-            "outcycle": 12,
+            "outpedspd": 4,
+            "outcycle": 15,
             "outcyclespd": 16,
-            "outtruck": 16,
-            "outtruckspd": 95
+            "outtruck": 18,
+            "outtruckspd": 54
         }
     ],
     "?PS1": [
         {
-            "CameraFPS": "60",
-            "ImageSize": "640*320",
+            "CameraFPS": "30",
+            "ImageSize": "2016*1520",
             "PixelDepth": "RAW10",
             "PixelOrder": "RGGB",
             "DNNModel": "TrafficCount20231102",
@@ -103,17 +101,17 @@
             "SendImageQuality": "100",
             "SendImageSizePercent": "100",
             "AEModel": "auto",
-            "Exposure": "1120",
-            "Gain": "1",
-            "AWBMode": "enable",
+            "Exposure": 4500,
+            "Gain": 854,
+            "AWBMode": "auto",
             "Heating": "enable",
-            "Time": "12/08/2023 14:00:58"
+            "Time": "28/04/2022 17:42:50"
         }
     ],
     "?PS2": [
         {
-            "CameraFPS": "60",
-            "ImageSize": "640*320",
+            "CameraFPS": "30",
+            "ImageSize": "2016*1520",
             "PixelDepth": "RAW10",
             "PixelOrder": "RGGB",
             "DNNModel": "TrafficCount20231102",
@@ -121,11 +119,11 @@
             "SendImageQuality": "100",
             "SendImageSizePercent": "100",
             "AEModel": "auto",
-            "Exposure": "1120",
-            "Gain": "1",
-            "AWBMode": "enable",
+            "Exposure": 4500,
+            "Gain": 854,
+            "AWBMode": "auto",
             "Heating": "enable",
-            "Time": "12/08/2023 14:00:58"
+            "Time": "28/04/2022 17:42:50"
         }
     ],
     "?PS3": [

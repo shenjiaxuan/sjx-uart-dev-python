@@ -23,6 +23,9 @@ def start_server():
                 elif message == "?OBdata":
                     print(f'get message: {message}')
                     #To Do
+                elif message[:8] == "Profile|":
+                    print(f'get message: {message}')
+                    #To Do
                 else:
                     break
         finally:

@@ -10,7 +10,7 @@ import time
 class UART:
     def __init__(self):
         self.uartport = serial.Serial(
-                port="COM2",
+                port="COM18",
                 baudrate=38400,
                 bytesize=serial.EIGHTBITS,
                 parity=serial.PARITY_NONE,
@@ -40,11 +40,11 @@ def append_response_to_file(command, response):
 
     if command in data:
         if isinstance(data[command], list):
-            data[command].extend(response)
+            data[command].append(response)
         else:
-            data[command] = [data[command]] + response
+            data[command] = [data[command], response]
     else:
-        data[command] = response
+        data[command] = [response]
 
     with open(filename, 'w') as file:
         json.dump(data, file, indent=4)
@@ -115,7 +115,6 @@ if __name__ == '__main__':
 
     for command in commands:
         uart.send_serial(command)
-        responses = []
         while True:
             response = uart.receive_serial()
             if response:
@@ -126,20 +125,15 @@ if __name__ == '__main__':
                     base64_data = extract_base64_data(response_str)
                     if base64_data:
                         image_data_list.append(base64_data)
-                    responses.append({"image_data_received": True})
+                    append_response_to_file(command, {"image_data_received": True})
                 else:
                     try:
                         response_json = json.loads(response_str)
-                        responses.append(response_json)
+                        append_response_to_file(command, response_json)
                     except json.JSONDecodeError:
                         print(f"Failed to decode JSON for command: {command}")
             else:
                 break
-
-        if responses:
-            append_response_to_file(command, responses)
-        else:
-            print(f"No response received for command: {command}")
 
     if image_data_list:
         combined_image_data = ''.join(image_data_list)
