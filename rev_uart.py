@@ -10,7 +10,7 @@ import time
 class UART:
     def __init__(self):
         self.uartport = serial.Serial(
-                port="COM18",
+                port="COM36",
                 baudrate=38400,
                 bytesize=serial.EIGHTBITS,
                 parity=serial.PARITY_NONE,
@@ -76,10 +76,10 @@ if __name__ == '__main__':
 
     commands = [
         "?Asset",
-        "@|300",
+        "@|600",
         "?Order",
         "Profile|1",
-        "WiFi|1",
+        "WiFi|0",
         "?ERR",
         "REACT|1",
         "?OBdata",
@@ -115,6 +115,7 @@ if __name__ == '__main__':
 
     for command in commands:
         uart.send_serial(command)
+        time.sleep(0.5)
         while True:
             response = uart.receive_serial()
             if response:

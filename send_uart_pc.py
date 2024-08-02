@@ -18,6 +18,7 @@ ener_mode = "0"
 image_index = 1
 send_time = 0
 str_image = []
+CAMERA1_DIAGNOSE_INFO_PATH = "/home/root/AglaiaSense/resource/share_config/diagnose_info_1.json"
 
 def load_config():
     with open('config.json', 'r') as file:

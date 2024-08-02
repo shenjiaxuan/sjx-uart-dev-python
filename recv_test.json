@@ -10,9 +10,9 @@
             "AppNumber": "699"
         }
     ],
-    "@|300": [
+    "@|600": [
         {
-            "NICFrequency": 300
+            "NICFrequency": 600
         }
     ],
     "?Order": [
@@ -29,10 +29,12 @@
             "CamProfile": 1
         }
     ],
-    "?ERR": [
+    "WiFi|0": [
         {
-            "WiFiEnable": 1
-        },
+            "WiFiEnable": 0
+        }
+    ],
+    "?ERR": [
         {
             "Cam1ErrCode": "0",
             "Cam2ErrCode": "0"
@@ -45,49 +47,20 @@
     ],
     "?OBdata": [
         {
-            "spdunit": "MPH",
-            "incar": 18,
-            "incarspd": 68,
-            "inbus": 3,
-            "inbusspd": 28,
-            "inped": 47,
-            "inpedspd": 8,
-            "incycle": 0,
-            "incyclespd": 0,
-            "intruck": 14,
-            "intruckspd": 53,
-            "outcar": 15,
-            "outcarspd": 82,
-            "outbus": 1,
-            "outbusspd": 83,
-            "outped": 2,
-            "outpedspd": 7,
-            "outcycle": 20,
-            "outcyclespd": 1,
-            "outtruck": 23,
-            "outtruckspd": 68
+            "cmd": 28,
+            "name": "person",
+            "x_start": 88,
+            "y_start": 62,
+            "x_end": 251,
+            "y_end": 257
         },
         {
-            "incar": 27,
-            "incarspd": 73,
-            "inbus": 5,
-            "inbusspd": 38,
-            "inped": 46,
-            "inpedspd": 6,
-            "incycle": 0,
-            "incyclespd": 0,
-            "intruck": 2,
-            "intruckspd": 74,
-            "outcar": 12,
-            "outcarspd": 68,
-            "outbus": 1,
-            "outbusspd": 57,
-            "outped": 1,
-            "outpedspd": 4,
-            "outcycle": 15,
-            "outcyclespd": 16,
-            "outtruck": 18,
-            "outtruckspd": 54
+            "cmd": 28,
+            "name": "person",
+            "x_start": 88,
+            "y_start": 62,
+            "x_end": 251,
+            "y_end": 257
         }
     ],
     "?PS1": [
@@ -101,11 +74,11 @@
             "SendImageQuality": "100",
             "SendImageSizePercent": "100",
             "AEModel": "auto",
-            "Exposure": 4500,
-            "Gain": 854,
-            "AWBMode": "auto",
+            "Exposure": 33,
+            "Gain": 16,
+            "AWBMode": "enable",
             "Heating": "enable",
-            "Time": "28/04/2022 17:42:50"
+            "Time": "28/04/2022 17:45:31"
         }
     ],
     "?PS2": [
@@ -119,27 +92,37 @@
             "SendImageQuality": "100",
             "SendImageSizePercent": "100",
             "AEModel": "auto",
-            "Exposure": 4500,
-            "Gain": 854,
-            "AWBMode": "auto",
+            "Exposure": 33,
+            "Gain": 16,
+            "AWBMode": "enable",
             "Heating": "enable",
-            "Time": "28/04/2022 17:42:50"
+            "Time": "28/04/2022 17:45:32"
         }
     ],
     "?PS3": [
         {
-            "OutcomingRefLine_x1": "100",
-            "OutcomingRefLine_y1": "500",
-            "OutcomingRefLine_x2": "100",
-            "OutcomingRefLine_y2": "200"
+            "x1": "120",
+            "y1": "110",
+            "x2": "185",
+            "y2": "120",
+            "x3": "171",
+            "y3": "142",
+            "x4": "137",
+            "y4": "188",
+            "x5": "99",
+            "y5": "154"
         }
     ],
     "?PS4": [
         {
-            "OutcomingRefLine_x1": "100",
-            "OutcomingRefLine_y1": "500",
-            "OutcomingRefLine_x2": "100",
-            "OutcomingRefLine_y2": "200"
+            "x1": "180",
+            "y1": "92",
+            "x2": "197",
+            "y2": "145",
+            "x3": "190",
+            "y3": "229",
+            "x4": "160",
+            "y4": "197"
         }
     ],
     "?PS5": [
@@ -193,6 +176,16 @@
         }
     ],
     "?PS15": [
+        {
+            "image_data_received": true
+        }
+    ],
+    "?PS16": [
+        {
+            "image_data_received": true
+        }
+    ],
+    "?PS17": [
         {
             "image_data_received": true
         }
