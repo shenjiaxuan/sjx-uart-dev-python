@@ -3,8 +3,9 @@ CAMERA1_DIAGNOSE_INFO_PATH = "/home/root/AglaiaSense/resource/share_config/diagn
 CAMERA2_DIAGNOSE_INFO_PATH = "/home/root/AglaiaSense/resource/share_config/diagnose_info_2.json"
 LEFT_SHM_BMP_NAME = "/left_imx501_bmp_shm"
 RIGHT_SHM_BMP_NAME = "/right_imx501_bmp_shm"
-LOG_FOLDER = "log"  # the folder path of the log files
+LOG_FOLDER = "log"
 SHM_BMP_SIZE = 36936000
+CONFIG_PATH = '/home/root/AglaiaSense/resource/share_config/uart_config.json'
 
 CAM1_ID = 1
 CAM2_ID = 2

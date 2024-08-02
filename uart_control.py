@@ -16,19 +16,12 @@ import os
 from definitions import *
 
 random.seed(1)
-image_folder = '/home/root/sjx/input_tensors/'
 send_max_length = 980
 count_interval = "300"
-# wifi_status = "0"
 profile_index = "1"
 ener_mode = "0"
-# image_index = 1
 send_time = 0
 str_image = []
-config_path = '/home/root/sjx/config.json'
-
-# cam1_image_shm_ptr = None
-# cam2_image_shm_ptr = None
 
 # open socket
 def open_socket(port,log_file):
@@ -70,7 +63,6 @@ def get_pic_from_socket(sock,shm_ptr,cam_id):
 
     image = Image.fromarray(image_array)
     tmp_image_path = Path(f'./tmp/tmp_{cam_id}.bmp').resolve()
-    # tmp_image_path = Path('./tmp/tmp.bmp').resolve()
     tmp_image_path.parent.mkdir(parents=True, exist_ok=True)
     image.save(tmp_image_path)
 
@@ -86,10 +78,6 @@ def get_dnn_date(sock):
 
 def camera_control_process(cam_socket, command, contol_val, log_file):
     try:
-        # if command == SET_GAIN:
-        #     gain_data_s = GainData(command, contol_val)
-        #     global_sock.sendall(gain_data_s.to_bytes())
-
         if command == GET_GAIN:
             gain_data_g = GainData(command)
             cam_socket.sendall(gain_data_g.to_bytes())
@@ -97,9 +85,6 @@ def camera_control_process(cam_socket, command, contol_val, log_file):
             if len(response) >= 2:
                 gain_data_g = GainData.from_bytes(response)
                 return gain_data_g.val
-        # elif command == SET_EXPOSURE:
-        #     exposure_data_s = ExposureData(command, contol_val)
-        #     global_sock.sendall(exposure_data_s.to_bytes())
 
         elif command == GET_EXPOSURE:
             exposure_data_g = ExposureData(command)
@@ -108,20 +93,7 @@ def camera_control_process(cam_socket, command, contol_val, log_file):
             if len(response) >= 2:
                 exposure_data_g = ExposureData.from_bytes(response)
                 return exposure_data_g.val
-        # elif command == SET_FRAMERATE:
-        #     frame_rate_data_s = FrameRateData(command, contol_val)
-        #     global_sock.sendall(frame_rate_data_s.to_bytes())
 
-        # elif command == GET_FRAMERATE:
-        #     frame_rate_data_g = FrameRateData(command)
-        #     global_sock.sendall(frame_rate_data_g.to_bytes())
-        #     response = global_sock.recv(512)
-        #     if len(response) >= 2:
-        #         frame_rate_data_g = FrameRateData.from_bytes(response)
-
-        # elif command == SET_AE_MODE:
-        #     ae_mode_data_s = AeModeData(command, contol_val)
-        #     global_sock.sendall(ae_mode_data_s.to_bytes())
         elif command == GET_AE_MODE:
             ae_mode_data_g = AeModeData(command)
             cam_socket.sendall(ae_mode_data_g.to_bytes())
@@ -129,9 +101,6 @@ def camera_control_process(cam_socket, command, contol_val, log_file):
             if len(response) >= 2:
                 ae_mode_data_g = AeModeData.from_bytes(response)
                 return ae_mode_data_g.val
-        # elif command == SET_AWB_MODE:
-        #     awb_mode_data_s = AwbModeData(command, contol_val)
-        #     global_sock.sendall(awb_mode_data_s.to_bytes())
 
         elif command == GET_AWB_MODE:
             awb_mode_data_g = AwbModeData(command)
@@ -188,7 +157,7 @@ def check_camera_errors(path):
     else:
         return "1"
 
-config = load_config(config_path)
+config = load_config(CONFIG_PATH)
 
 class UART:
     def __init__(self):
@@ -215,15 +184,9 @@ class UART:
 
 def update_sim_attribute(cam_id):
     global str_image
-    # global image_index
-    # if image_index > 10:
-    #     image_index = 1
-    # image_file_name = image_folder + str(image_index) + ".bmp"
-    # image_index = image_index + 1
-
     image = Image.open(f'./tmp/tmp_{cam_id}.bmp')
-    image.save("/home/root/sjx/converted-jpg-image.jpg", optimize=True, quality=50)
-    with open("/home/root/sjx/converted-jpg-image.jpg", "rb") as image2string:
+    image.save("./tmp/converted-jpg-image.jpg", optimize=True, quality=50)
+    with open("./tmp/converted-jpg-image.jpg", "rb") as image2string:
         converted_string = base64.b64encode(image2string.read()).decode()
     str_len = len(converted_string)
     send_time = math.ceil(str_len / send_max_length)
@@ -232,8 +195,6 @@ def update_sim_attribute(cam_id):
         str_image.append(converted_string[x*send_max_length:(x+1)*send_max_length])
 
 def main():
-    # global cam1_image_shm_ptr
-    # global cam2_image_shm_ptr
     global count_interval
     global profile_index
     global ener_mode
@@ -261,20 +222,7 @@ def main():
         log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Failed to map shared memory\n")
         cam1_image_shm.close_fd()
         return
-    
-    # shm_name = RIGHT_SHM_BMP_NAME
-    # cam2_image_shm = open_shared_memory(shm_name)
-    # if cam2_image_shm is None:
-    #     log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Failed to open shared memory\n")
-    #     return
-    # cam2_image_shm_ptr = map_shared_memory(cam2_image_shm)
-    # if cam2_image_shm is None:
-    #     log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Failed to map shared memory\n")
-    #     cam2_image_shm.close_fd()
-    #     return
-
     get_pic_from_socket(cam1_info_socket, cam1_image_shm_ptr, CAM1_ID)
-    # get_pic_from_socket(cam2_info_socket, cam2_image_shm_ptr, 2)
     update_sim_attribute(CAM1_ID)
 
     while True:
@@ -336,73 +284,6 @@ def main():
             elif string == "?OBdata":
                 get_pic_from_socket(cam1_info_socket, cam1_image_shm_ptr, CAM1_ID)
                 update_sim_attribute(CAM1_ID)
-                # response1 = json.dumps(config["?OBdata"][0])
-                # response2 = json.dumps(config["?OBdata"][1])
-                # uart.send_serial(response1)
-                # uart.send_serial(response2)
-                # cam1_data = [random.randrange(10,50),random.randrange(50,80), # in car
-                #              random.randrange(2,10),random.randrange(20,50), # in bus
-                #              random.randrange(40,100),random.randrange(1,10), # in ped
-                #              random.randrange(0,1),random.randrange(0,1), # in cycle
-                #              random.randrange(2,20),random.randrange(40,80), # in truck
-                #              random.randrange(12,40),random.randrange(20,100), # out car
-                #              random.randrange(1,2),random.randrange(30,85), # out bus
-                #              random.randrange(1,3),random.randrange(1,9), # out ped
-                #              random.randrange(1,25),random.randrange(1,20), # out cycle
-                #              random.randrange(1,30),random.randrange(40,100), # out truck
-                #              ]
-                # response1 = ("{\"spdunit\":\"MPH\","
-                #             "\"incar\":" + str(cam1_data[0]) + ","
-                #             "\"incarspd\":" + str(cam1_data[1]) + ","
-                #             "\"inbus\":" + str(cam1_data[2]) + ","
-                #             "\"inbusspd\":" + str(cam1_data[3]) + ","
-                #             "\"inped\":" + str(cam1_data[4]) + ","
-                #             "\"inpedspd\":" + str(cam1_data[5]) + ","
-                #             "\"incycle\":" + str(cam1_data[6]) + ","
-                #             "\"incyclespd\":" + str(cam1_data[7]) + ","
-                #             "\"intruck\":" + str(cam1_data[8]) + ","
-                #             "\"intruckspd\":" + str(cam1_data[9]) + ","
-                #             "\"outcar\":" + str(cam1_data[10]) + ","
-                #             "\"outcarspd\":" + str(cam1_data[11]) + ","
-                #             "\"outbus\":" + str(cam1_data[12]) + ","
-                #             "\"outbusspd\":" + str(cam1_data[13]) + ","
-                #             "\"outped\":" + str(cam1_data[14]) + ","
-                #             "\"outpedspd\":" + str(cam1_data[15]) + ","
-                #             "\"outcycle\":" + str(cam1_data[16]) + ","
-                #             "\"outcyclespd\":" + str(cam1_data[17]) + ","
-                #             "\"outtruck\":" + str(cam1_data[18]) + ","
-                #             "\"outtruckspd\":" + str(cam1_data[19]) + "}")
-                # cam2_data = [random.randrange(10,50),random.randrange(50,80), # in car
-                #              random.randrange(2,10),random.randrange(20,50), # in bus
-                #              random.randrange(40,100),random.randrange(1,10), # in ped
-                #              random.randrange(0,1),random.randrange(0,1), # in cycle
-                #              random.randrange(2,20),random.randrange(40,80), # in truck
-                #              random.randrange(12,40),random.randrange(20,100), # out car
-                #              random.randrange(1,2),random.randrange(30,85), # out bus
-                #              random.randrange(1,3),random.randrange(1,9), # out ped
-                #              random.randrange(1,25),random.randrange(1,20), # out cycle
-                #              random.randrange(1,30),random.randrange(40,100), # out truck
-                #              ]
-                # response2 = ("{\"incar\":" + str(cam2_data[0]) + ","
-                #             "\"incarspd\":" + str(cam2_data[1]) + ","
-                #             "\"inbus\":" + str(cam2_data[2]) + ","
-                #             "\"inbusspd\":" + str(cam2_data[3]) + ","
-                #             "\"inped\":" + str(cam2_data[4]) + ","
-                #             "\"inpedspd\":" + str(cam2_data[5]) + ","
-                #             "\"incycle\":" + str(cam2_data[6]) + ","
-                #             "\"incyclespd\":" + str(cam2_data[7]) + ","
-                #             "\"intruck\":" + str(cam2_data[8]) + ","
-                #             "\"intruckspd\":" + str(cam2_data[9]) + ","
-                #             "\"outcar\":" + str(cam2_data[10]) + ","
-                #             "\"outcarspd\":" + str(cam2_data[11]) + ","
-                #             "\"outbus\":" + str(cam2_data[12]) + ","
-                #             "\"outbusspd\":" + str(cam2_data[13]) + ","
-                #             "\"outped\":" + str(cam2_data[14]) + ","
-                #             "\"outpedspd\":" + str(cam2_data[15]) + ","
-                #             "\"outcycle\":" + str(cam2_data[16]) + ","
-                #             "\"outcyclespd\":" + str(cam2_data[17]) + ","
-                #             "\"outtruck\":" + str(cam2_data[18]) + ","
-                #             "\"outtruckspd\":" + str(cam2_data[19]) + "}")
                 dnn_dict1 = get_dnn_date(cam1_dnn_socket)
                 dnn_dict2 = get_dnn_date(cam1_dnn_socket)
                 response1 = json.dumps(dnn_dict1)
@@ -429,16 +310,12 @@ def main():
                         awb_status = "enable"
                     else:
                         awb_status = "disable"
-                    #exposure, gain = read_exposure_and_gain()
-                    # ae_model, awb_model = read_ae_awb_mode()
                     ps_data = config[f"?PS{index}"][0]
                     ps_data["Exposure"] = exposure
                     ps_data["Gain"] = gain
-
                     ps_data["AEModel"] = ae_status
                     ps_data["AWBMode"] = awb_status
                     ps_data["Time"] = current_time
-                    print(f"sjx debug:{exposure},{gain},{ae_model},{awb_model}")
                     response = json.dumps(ps_data)
                     uart.send_serial(response)
                 elif index in [3, 4]:
@@ -451,7 +328,6 @@ def main():
                     response = cam_info_socket.recv(512)
                     if len(response) >= 2 + MAX_ROI_POINT * 8:
                         roi_data_g = RoiData.from_bytes(response)
-
                     post_processing = {}
                     for i in range(roi_data_g.point_number):
                         post_processing[f"x{i+1}"] = str(roi_data_g.x[i])
@@ -465,8 +341,6 @@ def main():
             print("--- %s seconds ---" % (time.time() - start_time))
     unmap_shared_memory(cam1_image_shm_ptr)
     cam1_image_shm.close_fd()
-    # unmap_shared_memory(cam2_image_shm_ptr)
-    # cam2_image_shm.close_fd()
     cam1_dnn_socket.close()
 
 if __name__ == '__main__':

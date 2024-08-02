@@ -3,4 +3,6 @@
 
 # Ignore other files or directories
 *.log
+recv_test.json
+combined_image.bmp
 __pycache__/

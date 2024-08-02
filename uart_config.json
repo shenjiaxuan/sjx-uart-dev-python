@@ -75,12 +75,12 @@
     "?PS1": [
         {
             "CameraFPS": "30",
-            "ImageSize": "2016*1520",
+            "ImageSize": "300*300",
             "PixelDepth": "RAW10",
             "PixelOrder": "RGGB",
             "DNNModel": "TrafficCount20231102",
             "PostProcessingLogic": "8:00-PostProcessing1,19:00-PostProcessing2",
-            "SendImageQuality": "100",
+            "SendImageQuality": "50",
             "SendImageSizePercent": "100",
             "AEModel": "auto",
             "Exposure": "1120",
@@ -93,12 +93,12 @@
     "?PS2": [
         {
             "CameraFPS": "30",
-            "ImageSize": "2016*1520",
+            "ImageSize": "300*300",
             "PixelDepth": "RAW10",
             "PixelOrder": "RGGB",
             "DNNModel": "TrafficCount20231102",
             "PostProcessingLogic": "8:00-PostProcessing1,19:00-PostProcessing2",
-            "SendImageQuality": "100",
+            "SendImageQuality": "50",
             "SendImageSizePercent": "100",
             "AEModel": "auto",
             "Exposure": "1120",

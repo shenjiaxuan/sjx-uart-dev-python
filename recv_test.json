@@ -15,6 +15,11 @@
             "NICFrequency": 600
         }
     ],
+    "@|": [
+        {
+            "NICFrequency": 600
+        }
+    ],
     "?Order": [
         {
             "PassThAttr": "620,621,622,623,624,625,626,627,628,629,630,631,632,633,634,635,636,637,638,639,640,641,642,643",
@@ -29,7 +34,17 @@
             "CamProfile": 1
         }
     ],
+    "Profile|": [
+        {
+            "CamProfile": 1
+        }
+    ],
     "WiFi|0": [
+        {
+            "WiFiEnable": 0
+        }
+    ],
+    "WiFi|": [
         {
             "WiFiEnable": 0
         }
@@ -45,58 +60,63 @@
             "EmergencyMode": 1
         }
     ],
+    "REACT|": [
+        {
+            "EmergencyMode": 0
+        }
+    ],
     "?OBdata": [
         {
-            "cmd": 28,
-            "name": "person",
-            "x_start": 88,
-            "y_start": 62,
-            "x_end": 251,
-            "y_end": 257
+            "cmd": 0,
+            "name": "",
+            "x_start": 0,
+            "y_start": 0,
+            "x_end": 0,
+            "y_end": 0
         },
         {
-            "cmd": 28,
-            "name": "person",
-            "x_start": 88,
-            "y_start": 62,
-            "x_end": 251,
-            "y_end": 257
+            "cmd": 0,
+            "name": "",
+            "x_start": 0,
+            "y_start": 0,
+            "x_end": 0,
+            "y_end": 0
         }
     ],
     "?PS1": [
         {
             "CameraFPS": "30",
-            "ImageSize": "2016*1520",
+            "ImageSize": "300*300",
             "PixelDepth": "RAW10",
             "PixelOrder": "RGGB",
             "DNNModel": "TrafficCount20231102",
             "PostProcessingLogic": "8:00-PostProcessing1,19:00-PostProcessing2",
-            "SendImageQuality": "100",
+            "SendImageQuality": "50",
             "SendImageSizePercent": "100",
             "AEModel": "auto",
             "Exposure": 33,
             "Gain": 16,
             "AWBMode": "enable",
             "Heating": "enable",
-            "Time": "28/04/2022 17:45:31"
+            "Time": "28/04/2022 23:34:50"
         }
     ],
     "?PS2": [
         {
             "CameraFPS": "30",
-            "ImageSize": "2016*1520",
+            "ImageSize": "300*300",
             "PixelDepth": "RAW10",
             "PixelOrder": "RGGB",
             "DNNModel": "TrafficCount20231102",
             "PostProcessingLogic": "8:00-PostProcessing1,19:00-PostProcessing2",
-            "SendImageQuality": "100",
+            "SendImageQuality": "50",
             "SendImageSizePercent": "100",
             "AEModel": "auto",
             "Exposure": 33,
             "Gain": 16,
             "AWBMode": "enable",
             "Heating": "enable",
-            "Time": "28/04/2022 17:45:32"
+            "Time": "28/04/2022 23:34:50"
         }
     ],
     "?PS3": [
@@ -131,61 +151,6 @@
         }
     ],
     "?PS6": [
-        {
-            "image_data_received": true
-        }
-    ],
-    "?PS7": [
-        {
-            "image_data_received": true
-        }
-    ],
-    "?PS8": [
-        {
-            "image_data_received": true
-        }
-    ],
-    "?PS9": [
-        {
-            "image_data_received": true
-        }
-    ],
-    "?PS10": [
-        {
-            "image_data_received": true
-        }
-    ],
-    "?PS11": [
-        {
-            "image_data_received": true
-        }
-    ],
-    "?PS12": [
-        {
-            "image_data_received": true
-        }
-    ],
-    "?PS13": [
-        {
-            "image_data_received": true
-        }
-    ],
-    "?PS14": [
-        {
-            "image_data_received": true
-        }
-    ],
-    "?PS15": [
-        {
-            "image_data_received": true
-        }
-    ],
-    "?PS16": [
-        {
-            "image_data_received": true
-        }
-    ],
-    "?PS17": [
         {
             "image_data_received": true
         }
