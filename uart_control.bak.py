@@ -3,6 +3,7 @@ import serial
 import base64
 import time
 import math
+import random
 from PIL import Image
 import json
 import subprocess
@@ -14,12 +15,7 @@ import posix_ipc
 import os
 from definitions import *
 
-DEBUG = False
-
-def debug_print(*args, **kwargs):
-    if DEBUG:
-        print(*args, **kwargs)
-
+random.seed(1)
 send_max_length = 980
 count_interval = "300"
 profile_index = "1"
@@ -27,6 +23,7 @@ ener_mode = "0"
 send_time = 0
 str_image = []
 
+# open socket
 def open_socket(port,log_file):
     server_address = ('localhost', port)
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -115,9 +112,11 @@ def camera_control_process(cam_socket, command, contol_val, log_file):
         elif command == CAM_EN:
             cam_en = CamEn(command, contol_val)
             cam_socket.sendall(cam_en.to_bytes())
+            print(f">>> Test SET_CAM_EN, val = {cam_en.val}")
         elif command == ENERGENCY_MODE:
             energency_mode = EnergencyMode(command, contol_val)
             cam_socket.sendall(energency_mode.to_bytes())
+            print(f">>> Test SET_ENERGENCY_MODE, val = {energency_mode.val}")
         else:
             log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Camera command error: {hex(command)}\n")
     except socket.timeout:
@@ -134,6 +133,22 @@ def load_config(path):
 def get_wifi_status():
     result = subprocess.run(['nmcli', '-t', '-f', 'WIFI', 'radio'], capture_output=True, text=True)
     return result.stdout.strip()
+
+def read_exposure_and_gain():
+    result = subprocess.run(['i2ctransfer', '-f', '-y', '3', 'w2@0x1a', '0x02', '0x02', 'r4'], capture_output=True, text=True)
+    values = result.stdout.strip().split()
+    if len(values) < 4:
+        print("Error: Insufficient data received from i2ctransfer command.")
+        return None, None
+    exposure = (int(values[0], 16) << 8) + int(values[1], 16)  # Combine high and low bytes for exposure
+    gain = (int(values[2], 16) << 8) + int(values[3], 16)  # Combine high and low bytes for gain
+    return exposure, gain
+
+def read_ae_awb_mode():
+    result = subprocess.run(['i2ctransfer', '-f', '-y', '3', 'w2@0x1a', '0xD8', '0x00', 'r1'], capture_output=True, text=True)
+    value = int(result.stdout.strip(), 16)
+    ae_awb_mode = 'auto' if (value & 0x01) == 0 else 'manual'
+    return ae_awb_mode, ae_awb_mode  # Assuming the same value is used for AEModel and AWBMode
 
 def check_camera_errors(path):
     config = load_config(path)
@@ -160,7 +175,7 @@ class UART:
 
     def send_serial(self, cmd): 
         cmd = str(cmd).rstrip()
-        debug_print(time.strftime("%B-%d-%Y %H:%M:%S") + "  ->: {0}".format(cmd))
+        print(time.strftime("%B-%d-%Y %H:%M:%S") + "  ->: {0}".format(cmd))
         self.uartport.write((cmd+"\n").encode("utf_8"))
 
     def receive_serial(self):
@@ -180,26 +195,30 @@ def update_sim_attribute(cam_id):
         str_image.append(converted_string[x*send_max_length:(x+1)*send_max_length])
 
 def main():
-    global count_interval, profile_index, ener_mode
+    global count_interval
+    global profile_index
+    global ener_mode
     uart = UART()
     log_folder_path = Path(LOG_FOLDER)
-    log_folder_path.mkdir(parents=True, exist_ok=True)
+    if not log_folder_path.is_dir():
+        log_folder_path.mkdir(parents=True, exist_ok=True)  # create the log file folder if not exists
     log_file_path = log_folder_path.joinpath(f"log_{datetime.now().strftime('%m%d%Y')}.txt")
-    log_file_path.touch(exist_ok=True)
+    log_file_path.touch(exist_ok=True)  # create the log file if not exists
     log_file = open(log_file_path, 'a')
 
-    cam1_info_socket = open_socket(CAM1_INFO_PORT, log_file)
-    cam2_info_socket = open_socket(CAM2_INFO_PORT, log_file)
-    cam1_dnn_socket = open_socket(CAM1_DNN_PORT, log_file)
-    # cam2_dnn_socket = open_socket(CAM2_DNN_PORT, log_file)
+    cam1_info_socket = open_socket(CAM1_INFO_PORT,log_file)
+    cam2_info_socket = open_socket(CAM2_INFO_PORT,log_file)
+    cam1_dnn_socket = open_socket(CAM1_DNN_PORT,log_file)
+    cam2_dnn_socket = open_socket(CAM2_DNN_PORT,log_file)
 
+    # open image_shm
     shm_name = LEFT_SHM_BMP_NAME
     cam1_image_shm = open_shared_memory(shm_name)
     if cam1_image_shm is None:
         log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Failed to open shared memory\n")
         return
     cam1_image_shm_ptr = map_shared_memory(cam1_image_shm)
-    if cam1_image_shm_ptr is None:
+    if cam1_image_shm is None:
         log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Failed to map shared memory\n")
         cam1_image_shm.close_fd()
         return
@@ -211,7 +230,7 @@ def main():
         if raw_data:
             start_time = time.time()
             string = raw_data.decode("utf_8", "ignore").rstrip()
-            debug_print(f"{datetime.now().strftime('%B-%d-%Y %H:%M:%S')}  <-: {string}")
+            print(time.strftime("%B-%d-%Y %H:%M:%S") + "  <-: {0}".format(string))
             if string == "?Asset":
                 response = json.dumps(config["?Asset"][0])
                 uart.send_serial(response)
@@ -249,6 +268,7 @@ def main():
             elif string == "?ERR":
                 cam1_error_code = check_camera_errors(CAMERA1_DIAGNOSE_INFO_PATH)
                 cam2_error_code = check_camera_errors(CAMERA2_DIAGNOSE_INFO_PATH)
+                # response = {"Cam1ErrCode": cam1_error_code, "Cam2ErrCode": cam2_error_code}
                 response = json.dumps({"Cam1ErrCode": cam1_error_code,"Cam2ErrCode": cam2_error_code})
                 uart.send_serial(response)
             elif string[:6] == "REACT|":
@@ -318,9 +338,7 @@ def main():
                     if (index - 5) < len(str_image):
                         response = "{\"Block" + str(index - 4) + ":" + str_image[index - 5] + "}"
                         uart.send_serial(response)
-
-            debug_print(f"--- {time.time() - start_time} seconds ---")
-
+            print("--- %s seconds ---" % (time.time() - start_time))
     unmap_shared_memory(cam1_image_shm_ptr)
     cam1_image_shm.close_fd()
     cam1_dnn_socket.close()
