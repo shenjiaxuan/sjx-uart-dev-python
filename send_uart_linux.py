@@ -19,7 +19,7 @@ random.seed(1)
 image_folder = '/home/root/sjx/input_tensors/'
 send_max_length = 980
 count_interval = "300"
-wifi_status = "0"
+# wifi_status = "0"
 profile_index = "1"
 ener_mode = "0"
 # image_index = 1
@@ -234,6 +234,9 @@ def update_sim_attribute(cam_id):
 def main():
     # global cam1_image_shm_ptr
     # global cam2_image_shm_ptr
+    global count_interval
+    global profile_index
+    global ener_mode
     uart = UART()
     log_folder_path = Path(LOG_FOLDER)
     if not log_folder_path.is_dir():
