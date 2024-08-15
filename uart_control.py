@@ -12,7 +12,19 @@ from pathlib import Path
 import mmap
 import posix_ipc
 import os
-from definitions import *
+from socket_def import *
+
+CAMERA1_DIAGNOSE_INFO_PATH = "/home/root/AglaiaSense/resource/share_config/diagnose_info_1.json"
+CAMERA2_DIAGNOSE_INFO_PATH = "/home/root/AglaiaSense/resource/share_config/diagnose_info_2.json"
+LOG_FOLDER = "log"
+CONFIG_PATH = '/home/root/AglaiaSense/resource/share_config/uart_config.json'
+CAM1_ID = 1
+CAM2_ID = 2
+# define pic size
+IMAGE_CHANNELS = 3
+IMAGE_HEIGHT = 300
+IMAGE_WIDTH = 300
+
 
 DEBUG = False
 
@@ -188,12 +200,12 @@ def main():
     log_file_path.touch(exist_ok=True)
     log_file = open(log_file_path, 'a')
 
-    cam1_info_socket = open_socket(CAM1_INFO_PORT, log_file)
-    cam2_info_socket = open_socket(CAM2_INFO_PORT, log_file)
-    cam1_dnn_socket = open_socket(CAM1_DNN_PORT, log_file)
-    # cam2_dnn_socket = open_socket(CAM2_DNN_PORT, log_file)
+    cam1_info_socket = open_socket(CAMERA1_PORT, log_file)
+    cam2_info_socket = open_socket(CAMERA2_PORT, log_file)
+    cam1_dnn_socket = open_socket(CAMERA1_DNN_PORT, log_file)
+    # cam2_dnn_socket = open_socket(CAMERA2_DNN_PORT, log_file)
 
-    shm_name = LEFT_SHM_BMP_NAME
+    shm_name = CAMERA1_SHM_BMP_NAME
     cam1_image_shm = open_shared_memory(shm_name)
     if cam1_image_shm is None:
         log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Failed to open shared memory\n")
