@@ -39,13 +39,13 @@ E_FLGA_DEVM = 0xF2
 E_FLGA_UART = 0xF3
 E_FLGA_DNN_SERVER = 0xF4
 
-
+SOCK_COMM_LEN = 512
 MAX_ROI_POINT = 50
 
 
 class ProtoData:
     def __init__(self):
-        self.val = bytearray(512)
+        self.val = bytearray(SOCK_COMM_LEN)
 
     def to_bytes(self):
         return bytes(self.val)
@@ -217,7 +217,7 @@ class RoiData:
         data_format = f'B B {MAX_ROI_POINT}I {MAX_ROI_POINT}I'
         roi_data_bytes = struct.pack(data_format, self.cmd, self.point_number, *self.x, *self.y)
 
-        ProData = bytearray(512)
+        ProData = bytearray(SOCK_COMM_LEN)
         ProData[:len(roi_data_bytes)] = roi_data_bytes
         return ProData
 
