@@ -14,7 +14,7 @@ import posix_ipc
 import os
 from threading import Thread
 from socket_def import *
-import signal
+# import signal
 
 CAMERA1_DIAGNOSE_INFO_PATH = "/home/root/AglaiaSense/resource/share_config/diagnose_info_1.json"
 CAMERA2_DIAGNOSE_INFO_PATH = "/home/root/AglaiaSense/resource/share_config/diagnose_info_2.json"
@@ -34,7 +34,7 @@ profile_index = "1"
 ener_mode = "0"
 send_time = 0
 str_image = []
-running = True
+# running = True
 
 dnn_default_dirct = {}
 sockets = {
@@ -44,18 +44,18 @@ sockets = {
     'cam2_dnn_sock': None
 }
 
-def signal_handler(sig, frame):
-    global running
-    running = False
+# def signal_handler(sig, frame):
+#     global running
+#     running = False
 
-signal.signal(signal.SIGINT, signal_handler)
+# signal.signal(signal.SIGINT, signal_handler)
 
 def debug_print(*args, **kwargs):
     if DEBUG:
         print(*args, **kwargs)
 
 def connect_socket(server_address, log_file, socket_key):
-    while running:
+    while True:
         if sockets[socket_key] is not None:
             time.sleep(1)  # If the connection exists, wait briefly
             continue
@@ -275,6 +275,11 @@ def main():
     cam1_dnn_thread = Thread(target=connect_socket, args=(cam1_dnn_address, log_file, 'cam1_dnn_sock'))
     cam2_dnn_thread = Thread(target=connect_socket, args=(cam2_dnn_address, log_file, 'cam2_dnn_sock'))
 
+    cam1_info_thread.daemon = True
+    cam2_info_thread.daemon = True
+    cam1_dnn_thread.daemon = True
+    cam2_dnn_thread.daemon = True
+
     cam1_info_thread.start()
     cam2_info_thread.start()
     cam1_dnn_thread.start()
@@ -293,7 +298,7 @@ def main():
     get_pic_from_socket('cam1_info_sock', cam1_image_shm_ptr, CAM1_ID, log_file)
     update_sim_attribute(CAM1_ID)
 
-    while running:
+    while True:
         raw_data = uart.receive_serial()
         if raw_data:
             start_time = time.time()
@@ -414,21 +419,21 @@ def main():
 
             debug_print(f"--- {time.time() - start_time} seconds ---")
 
-    cam1_info_thread.join()
-    cam2_info_thread.join()
-    cam1_dnn_thread.join()
-    cam2_dnn_thread.join()
-    if sockets['cam1_info_sock']:
-        sockets['cam1_info_sock'].close()
-    if sockets['cam2_info_sock']:
-        sockets['cam2_info_sock'].close()
-    if sockets['cam1_dnn_sock']:
-        sockets['cam1_dnn_sock'].close()
-    if sockets['cam2_dnn_sock']:
-        sockets['cam2_dnn_sock'].close()
-    if cam1_image_shm_ptr is not None:
-        cam1_image_shm_ptr.close() 
-    cam1_image_shm.close_fd()
+    # cam1_info_thread.join()
+    # cam2_info_thread.join()
+    # cam1_dnn_thread.join()
+    # cam2_dnn_thread.join()
+    # if sockets['cam1_info_sock']:
+    #     sockets['cam1_info_sock'].close()
+    # if sockets['cam2_info_sock']:
+    #     sockets['cam2_info_sock'].close()
+    # if sockets['cam1_dnn_sock']:
+    #     sockets['cam1_dnn_sock'].close()
+    # if sockets['cam2_dnn_sock']:
+    #     sockets['cam2_dnn_sock'].close()
+    # if cam1_image_shm_ptr is not None:
+    #     cam1_image_shm_ptr.close() 
+    # cam1_image_shm.close_fd()
 
 if __name__ == '__main__':
     main()
