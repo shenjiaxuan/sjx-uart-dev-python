@@ -10,7 +10,7 @@ import time
 class UART:
     def __init__(self):
         self.uartport = serial.Serial(
-                port="COM36",
+                port="COM40",
                 baudrate=38400,
                 bytesize=serial.EIGHTBITS,
                 parity=serial.PARITY_NONE,
@@ -125,7 +125,8 @@ if __name__ == '__main__':
             if response:
                 response_str = response.decode("utf_8", "ignore").rstrip()
                 print(time.strftime("%B-%d-%Y %H:%M:%S") + "  <-: {0}".format(response_str))
-
+                if response_str.startswith('?OBdata'):
+                    time.sleep(3)
                 if response_str.startswith('{"Block'):
                     base64_data = extract_base64_data(response_str)
                     if base64_data:

@@ -115,7 +115,7 @@ def map_shared_memory(shm):
         return None
     return shm_ptr
 
-def get_pic_from_socket(socket_key, shm_ptr, cam_id, log_file):
+def get_pic_from_socket(shm_ptr, cam_id):
     shm_ptr.seek(0)
     image_data = shm_ptr.read(IMAGE_WIDTH * IMAGE_HEIGHT * IMAGE_CHANNELS)
     image_array = np.frombuffer(image_data, dtype=np.uint8)
@@ -226,17 +226,30 @@ class UART:
         rcvdata = self.uartport.readline()
         return rcvdata
 
-def update_sim_attribute(cam_id):
+def update_sim_attribute(cam_num):
     global str_image
-    image = Image.open(f'./tmp/tmp_{cam_id}.bmp')
-    image.save("./tmp/converted-jpg-image.jpg", optimize=True, quality=50)
-    with open("./tmp/converted-jpg-image.jpg", "rb") as image2string:
+    if cam_num == 1:
+        image = Image.open('./tmp/tmp_1.bmp')
+        image.save('./tmp/converted-jpg-image.jpg', optimize=True, quality=50)
+    elif cam_num == 2:
+        image1 = Image.open('./tmp/tmp_1.bmp')
+        image2 = Image.open('./tmp/tmp_2.bmp')
+
+        # 横向拼接
+        new_image = Image.new('RGB', (image1.width + image2.width, max(image1.height, image2.height)))
+        new_image.paste(image1, (0, 0))
+        new_image.paste(image2, (image1.width, 0))
+
+        new_image.save('./tmp/converted-jpg-image.jpg', optimize=True, quality=20)
+    
+    with open('./tmp/converted-jpg-image.jpg', 'rb') as image2string:
         converted_string = base64.b64encode(image2string.read()).decode()
+    
     str_len = len(converted_string)
     send_time = math.ceil(str_len / send_max_length)
     str_image = []
     for x in range(send_time):
-        str_image.append(converted_string[x*send_max_length:(x+1)*send_max_length])
+        str_image.append(converted_string[x * send_max_length:(x + 1) * send_max_length])
 
 def main():
     global count_interval, ener_mode
@@ -268,6 +281,7 @@ def main():
     cam1_dnn_thread.start()
     cam2_dnn_thread.start()
 
+    # open camera1 shared_memory
     shm_name = CAMERA1_SHM_BMP_NAME
     cam1_image_shm = open_shared_memory(shm_name)
     if cam1_image_shm is None:
@@ -278,9 +292,22 @@ def main():
         log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Failed to map shared memory\n")
         cam1_image_shm.close_fd()
         return
-    get_pic_from_socket('cam1_info_sock', cam1_image_shm_ptr, CAM1_ID, log_file)
-    update_sim_attribute(CAM1_ID)
 
+    # open camera2 shared_memory
+    shm_name = CAMERA2_SHM_BMP_NAME
+    cam2_image_shm = open_shared_memory(shm_name)
+    if cam2_image_shm is None:
+        log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Failed to open shared memory\n")
+        return
+    cam2_image_shm_ptr = map_shared_memory(cam2_image_shm)
+    if cam2_image_shm_ptr is None:
+        log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Failed to map shared memory\n")
+        cam2_image_shm.close_fd()
+        return
+    get_pic_from_socket(cam1_image_shm_ptr, CAM1_ID)
+    get_pic_from_socket(cam2_image_shm_ptr, CAM2_ID)
+    update_sim_attribute(cam_num = 1)
+ 
     while True:
         raw_data = uart.receive_serial()
         if raw_data:
@@ -333,8 +360,9 @@ def main():
                     pass
                     ener_mode = "0"
             elif string == "?OBdata":
-                get_pic_from_socket('cam1_info_sock', cam1_image_shm_ptr, CAM1_ID, log_file)
-                update_sim_attribute(CAM1_ID)
+                get_pic_from_socket(cam1_image_shm_ptr, CAM1_ID)
+                get_pic_from_socket(cam2_image_shm_ptr, CAM2_ID)
+                update_sim_attribute(cam_num = 2)
                 dnn_dict1 = get_dnn_date('cam1_dnn_sock', log_file)
                 dnn_dict2 = get_dnn_date('cam2_dnn_sock', log_file)
                 if dnn_dict1:
