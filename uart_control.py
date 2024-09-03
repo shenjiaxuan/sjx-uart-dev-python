@@ -116,6 +116,7 @@ def map_shared_memory(shm):
     return shm_ptr
 
 def get_pic_from_socket(socket_key, shm_ptr, cam_id, log_file):
+    shm_ptr.seek(0)
     image_data = shm_ptr.read(IMAGE_WIDTH * IMAGE_HEIGHT * IMAGE_CHANNELS)
     image_array = np.frombuffer(image_data, dtype=np.uint8)
     image_array = image_array.reshape((IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNELS))
@@ -130,8 +131,8 @@ def get_dnn_date(socket_key, log_file):
     send_data(socket_key, dnn_data_request.to_bytes(), log_file)
     response = receive_data(socket_key, SOCK_COMM_LEN, log_file)
     if response:
-        dnn_data = DnnDataYolo.from_bytes(response)
-        dnn_dict = dnn_data.to_dict()
+        json_response = response.decode('utf-8')
+        dnn_dict = DnnDataYolo.from_json(json_response)
         return dnn_dict
     else:
         return None

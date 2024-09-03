@@ -1,4 +1,5 @@
 import struct
+import json
 CAMERA1_PORT = 10808
 CAMERA2_PORT = 10809
 CAMERA1_DNN_PORT = 11808
@@ -245,34 +246,41 @@ class ClientDev:
         return proto_data.to_bytes()
 
 class DnnDataYolo:
-    def __init__(self, cmd=0, name='', x_start=0, y_start=0, x_end=0, y_end=0):
+    def __init__(self, cmd=0, incar=0, inbus=0, inped=0, incycle=0, intruck=0,
+                 outcar=0, outbus=0, outped=0, outcycle=0, outtruck=0):
         self.cmd = cmd
-        self.name = name
-        self.x_start = x_start
-        self.y_start = y_start
-        self.x_end = x_end
-        self.y_end = y_end
+        self.incar = incar
+        self.inbus = inbus
+        self.inped = inped
+        self.incycle = incycle
+        self.intruck = intruck
+        self.outcar = outcar
+        self.outbus = outbus
+        self.outped = outped
+        self.outcycle = outcycle
+        self.outtruck = outtruck
 
     def to_bytes(self):
         proto_data = ProtoData()
-        name_bytes = self.name.encode('utf-8')[:31] + b'\x00' * (31 - len(self.name))
-        struct.pack_into('B 31s I I I I', proto_data.val, 0, self.cmd, name_bytes, self.x_start, self.y_start, self.x_end, self.y_end)
+        struct.pack_into('B I I I I I I I I I I', proto_data.val, 0, 
+                         self.cmd, self.incar, self.inbus, self.inped, 
+                         self.incycle, self.intruck, self.outcar, 
+                         self.outbus, self.outped, self.outcycle, 
+                         self.outtruck)
         return proto_data.to_bytes()
 
     @classmethod
-    def from_bytes(cls, data):
-        if len(data) < 48:
-            raise ValueError(f"Data is too short: expected at least 48 bytes, got {len(data)}.")
-        cmd, name_bytes, x_start, y_start, x_end, y_end = struct.unpack('B 31s I I I I', data[:48])
-        name = name_bytes.decode('utf-8').strip('\x00')
-        return cls(cmd, name, x_start, y_start, x_end, y_end)
-
-    def to_dict(self):
+    def from_json(cls, json_data):
+        data = json.loads(json_data)
         return {
-            'cmd': self.cmd,
-            'name': self.name,
-            'x_start': self.x_start,
-            'y_start': self.y_start,
-            'x_end': self.x_end,
-            'y_end': self.y_end
+            'incar': data.get('incar', 0),
+            'inbus': data.get('inbus', 0),
+            'inped': data.get('inped', 0),
+            'incycle': data.get('incycle', 0),
+            'intruck': data.get('intruck', 0),
+            'outcar': data.get('outcar', 0),
+            'outbus': data.get('outbus', 0),
+            'outped': data.get('outped', 0),
+            'outcycle': data.get('outcycle', 0),
+            'outtruck': data.get('outtruck', 0)
         }
