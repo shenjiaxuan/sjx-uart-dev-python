@@ -14,7 +14,6 @@ import posix_ipc
 import os
 from threading import Thread
 from socket_def import *
-# import signal
 
 CAMERA1_DIAGNOSE_INFO_PATH = "/home/root/AglaiaSense/resource/share_config/diagnose_info_1.json"
 CAMERA2_DIAGNOSE_INFO_PATH = "/home/root/AglaiaSense/resource/share_config/diagnose_info_2.json"
@@ -30,11 +29,10 @@ DEBUG = False
 
 send_max_length = 980
 count_interval = "300"
-profile_index = "1"
+profile_index = "3"
 ener_mode = "0"
 send_time = 0
 str_image = []
-# running = True
 
 dnn_default_dirct = {}
 sockets = {
@@ -43,12 +41,6 @@ sockets = {
     'cam1_dnn_sock': None,
     'cam2_dnn_sock': None
 }
-
-# def signal_handler(sig, frame):
-#     global running
-#     running = False
-
-# signal.signal(signal.SIGINT, signal_handler)
 
 def debug_print(*args, **kwargs):
     if DEBUG:
@@ -73,7 +65,6 @@ def connect_socket(server_address, log_file, socket_key):
                 f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Failed to connect to server: {e}. Retrying in 5 seconds...\n"
             )
             time.sleep(5)  # Wait 5 seconds and try again
-    return
 
 def send_data(socket_key, data, log_file):
     sock = sockets[socket_key]
@@ -125,15 +116,6 @@ def map_shared_memory(shm):
     return shm_ptr
 
 def get_pic_from_socket(socket_key, shm_ptr, cam_id, log_file):
-    # get pic_shm from camera
-    # bmp_data = BmpData(BMP_GET)
-    # # sock.sendall(bmp_data.to_bytes())
-    # send_data(socket_key, bmp_data.to_bytes(), log_file)
-    # # response = sock.recv(SOCK_COMM_LEN)
-    # response = receive_data(socket_key, SOCK_COMM_LEN, log_file)
-    # bmp_data = BmpData.from_bytes(response)
-    # get image from shm
-    shm_ptr.seek(0)
     image_data = shm_ptr.read(IMAGE_WIDTH * IMAGE_HEIGHT * IMAGE_CHANNELS)
     image_array = np.frombuffer(image_data, dtype=np.uint8)
     image_array = image_array.reshape((IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNELS))
@@ -256,7 +238,7 @@ def update_sim_attribute(cam_id):
         str_image.append(converted_string[x*send_max_length:(x+1)*send_max_length])
 
 def main():
-    global count_interval, profile_index, ener_mode
+    global count_interval, ener_mode
     uart = UART()
     log_folder_path = Path(LOG_FOLDER)
     log_folder_path.mkdir(parents=True, exist_ok=True)
@@ -316,10 +298,6 @@ def main():
                 response = json.dumps(config["?Order"][0])
                 uart.send_serial(response)
             elif string[:8] == "Profile|":
-                if string[8:] and int(string[8:]) in [0, 1, 2, 3, 16, 17, 18, 19]:
-                    profile_index = str(string[8:])
-                    camera_control_process('cam1_info_sock', CAM_EN, int(profile_index), log_file)
-                    camera_control_process('cam2_info_sock', CAM_EN, int(profile_index), log_file)
                 response = json.dumps({"CamProfile": int(profile_index)})
                 uart.send_serial(response)
             elif string[:5] == "WiFi|":
@@ -418,22 +396,5 @@ def main():
                         uart.send_serial(response)
 
             debug_print(f"--- {time.time() - start_time} seconds ---")
-
-    # cam1_info_thread.join()
-    # cam2_info_thread.join()
-    # cam1_dnn_thread.join()
-    # cam2_dnn_thread.join()
-    # if sockets['cam1_info_sock']:
-    #     sockets['cam1_info_sock'].close()
-    # if sockets['cam2_info_sock']:
-    #     sockets['cam2_info_sock'].close()
-    # if sockets['cam1_dnn_sock']:
-    #     sockets['cam1_dnn_sock'].close()
-    # if sockets['cam2_dnn_sock']:
-    #     sockets['cam2_dnn_sock'].close()
-    # if cam1_image_shm_ptr is not None:
-    #     cam1_image_shm_ptr.close() 
-    # cam1_image_shm.close_fd()
-
 if __name__ == '__main__':
     main()
