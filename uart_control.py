@@ -120,7 +120,7 @@ def get_pic_from_socket(shm_ptr, cam_id):
     image_data = shm_ptr.read(IMAGE_WIDTH * IMAGE_HEIGHT * IMAGE_CHANNELS)
     image_array = np.frombuffer(image_data, dtype=np.uint8)
     image_array = image_array.reshape((IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNELS))
-
+    image_array = image_array[..., ::-1]
     image = Image.fromarray(image_array)
     tmp_image_path = Path(f'./tmp/tmp_{cam_id}.bmp').resolve()
     tmp_image_path.parent.mkdir(parents=True, exist_ok=True)
@@ -306,7 +306,7 @@ def main():
         return
     get_pic_from_socket(cam1_image_shm_ptr, CAM1_ID)
     get_pic_from_socket(cam2_image_shm_ptr, CAM2_ID)
-    update_sim_attribute(cam_num = 1)
+    update_sim_attribute(cam_num = 2)
  
     while True:
         raw_data = uart.receive_serial()
