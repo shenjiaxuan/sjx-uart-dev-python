@@ -34,7 +34,7 @@ ener_mode = "0"
 send_time = 0
 str_image = []
 
-dnn_default_dirct = {}
+dnn_default_dirct = {"spdunit":"MPH","incar":0,"incarspd":-1,"inbus":0,"inbusspd":-1,"inped":0,"inpedspd":-1,"incycle":0,"incyclespd":-1,"intruck":0,"intruckspd":-1,"outcar":0,"outcarspd":-1,"outbus":0,"outbusspd":-1,"outped":0,"outpedspd":-1,"outcycle":0,"outcyclespd":-1,"outtruck":0,"outtruckspd":-1}
 sockets = {
     'cam1_info_sock': None,
     'cam2_info_sock': None,
@@ -42,9 +42,11 @@ sockets = {
     'cam2_dnn_sock': None
 }
 
-def debug_print(*args, **kwargs):
+def debug_print(log_file, *args, **kwargs):
     if DEBUG:
-        print(*args, **kwargs)
+        message = ' '.join(map(str, args))
+        log_file.write(f"[info][{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: {message}\n")
+        log_file.flush()
 
 def connect_socket(server_address, log_file, socket_key):
     while True:
@@ -204,7 +206,8 @@ def check_camera_errors(path):
 config = load_config(CONFIG_PATH)
 
 class UART:
-    def __init__(self):
+    def __init__(self, log_file):
+        self.log_file = log_file
         self.uartport = serial.Serial(
                 port="/dev/ttymxc2",
                 baudrate=38400,
@@ -219,7 +222,7 @@ class UART:
 
     def send_serial(self, cmd): 
         cmd = str(cmd).rstrip()
-        debug_print(time.strftime("%B-%d-%Y %H:%M:%S") + "  ->: {0}".format(cmd))
+        debug_print(self.log_file, time.strftime("%B-%d-%Y %H:%M:%S") + "  ->: {0}".format(cmd))
         self.uartport.write((cmd+"\n").encode("utf_8"))
 
     def receive_serial(self):
@@ -252,14 +255,14 @@ def update_sim_attribute(cam_num):
         str_image.append(converted_string[x * send_max_length:(x + 1) * send_max_length])
 
 def main():
-    global count_interval, ener_mode
-    uart = UART()
+    global count_interval, profile_index, ener_mode
     log_folder_path = Path(LOG_FOLDER)
     log_folder_path.mkdir(parents=True, exist_ok=True)
     log_file_path = log_folder_path.joinpath(f"log_{datetime.now().strftime('%m%d%Y')}.txt")
     log_file_path.touch(exist_ok=True)
     log_file = open(log_file_path, 'a')
-
+    uart = UART(log_file)
+    dnn_dirct = dnn_default_dirct.copy()
     # open sockets
     cam1_info_address = ("localhost", CAMERA1_PORT)
     cam2_info_address = ("localhost", CAMERA2_PORT)
@@ -307,13 +310,13 @@ def main():
     get_pic_from_socket(cam1_image_shm_ptr, CAM1_ID)
     get_pic_from_socket(cam2_image_shm_ptr, CAM2_ID)
     update_sim_attribute(cam_num = 2)
- 
+
     while True:
         raw_data = uart.receive_serial()
         if raw_data:
             start_time = time.time()
             string = raw_data.decode("utf_8", "ignore").rstrip()
-            debug_print(f"{datetime.now().strftime('%B-%d-%Y %H:%M:%S')}  <-: {string}")
+            debug_print(log_file, f"{datetime.now().strftime('%B-%d-%Y %H:%M:%S')}  <-: {string}")
             if string == "?Asset":
                 response = json.dumps(config["?Asset"][0])
                 uart.send_serial(response)
@@ -326,6 +329,8 @@ def main():
                 response = json.dumps(config["?Order"][0])
                 uart.send_serial(response)
             elif string[:8] == "Profile|":
+                if string[8:] and int(string[8:]) in [0, 1, 2, 3, 16, 17, 18, 19]:
+                    profile_index = str(string[8:])
                 response = json.dumps({"CamProfile": int(profile_index)})
                 uart.send_serial(response)
             elif string[:5] == "WiFi|":
@@ -367,12 +372,18 @@ def main():
                 dnn_dict2 = get_dnn_date('cam2_dnn_sock', log_file)
                 if dnn_dict1:
                     response1 = json.dumps(dnn_dict1)
-                    uart.send_serial(response1)
+                    response1 = json.loads(response1)
+                    for key in response1.keys():
+                        dnn_dirct[key] = response1[key]
+                    uart.send_serial(dnn_dirct)
                 else:
                     uart.send_serial(dnn_default_dirct)
                 if dnn_dict2:
                     response2 = json.dumps(dnn_dict2)
-                    uart.send_serial(response2)
+                    response2 = json.loads(response2)
+                    for key in response2.keys():
+                        dnn_dirct[key] = response2[key]
+                    uart.send_serial(dnn_dirct)
                 else:
                     uart.send_serial(dnn_default_dirct)
             elif string[:3] == "?PS":
@@ -424,6 +435,6 @@ def main():
                         response = "{\"Block" + str(index - 4) + ":" + str_image[index - 5] + "}"
                         uart.send_serial(response)
 
-            debug_print(f"--- {time.time() - start_time} seconds ---")
+            debug_print(log_file, f"--- {time.time() - start_time} seconds ---")
 if __name__ == '__main__':
     main()
