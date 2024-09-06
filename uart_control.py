@@ -18,7 +18,7 @@ from socket_def import *
 CAMERA1_DIAGNOSE_INFO_PATH = "/home/root/AglaiaSense/resource/share_config/diagnose_info_1.json"
 CAMERA2_DIAGNOSE_INFO_PATH = "/home/root/AglaiaSense/resource/share_config/diagnose_info_2.json"
 LOG_FOLDER = "log"
-CONFIG_PATH = '/home/root/AglaiaSense/resource/share_config/uart_config.json'
+CONFIG_PATH = '/home/root/AglaiaSense/resource/share_config/gs501.json'
 CAM1_ID = 1
 CAM2_ID = 2
 # define pic size
@@ -203,8 +203,6 @@ def check_camera_errors(path):
     else:
         return "1"
 
-config = load_config(CONFIG_PATH)
-
 class UART:
     def __init__(self, log_file):
         self.log_file = log_file
@@ -238,7 +236,6 @@ def update_sim_attribute(cam_num):
         image1 = Image.open('./tmp/tmp_1.bmp')
         image2 = Image.open('./tmp/tmp_2.bmp')
 
-        # 横向拼接
         new_image = Image.new('RGB', (image1.width + image2.width, max(image1.height, image2.height)))
         new_image.paste(image1, (0, 0))
         new_image.paste(image2, (image1.width, 0))
@@ -263,6 +260,7 @@ def main():
     log_file = open(log_file_path, 'a')
     uart = UART(log_file)
     dnn_dirct = dnn_default_dirct.copy()
+    config = load_config(CONFIG_PATH)
     # open sockets
     cam1_info_address = ("localhost", CAMERA1_PORT)
     cam2_info_address = ("localhost", CAMERA2_PORT)
@@ -318,7 +316,16 @@ def main():
             string = raw_data.decode("utf_8", "ignore").rstrip()
             debug_print(log_file, f"{datetime.now().strftime('%B-%d-%Y %H:%M:%S')}  <-: {string}")
             if string == "?Asset":
-                response = json.dumps(config["?Asset"][0])
+                asset_data = {
+                    "MfrName": config["MfrName"],
+                    "ModelNumber": config["ModelNumber"],
+                    "SerialNumber": config["SerialNumber"],
+                    "MfgDate": config["MfgDate"],
+                    "FWVersion": config["FWVersion"],
+                    "HWVersion": config["HWVersion"],
+                    "AppNumber": config["AppNumber"]
+                }
+                response = json.dumps(asset_data)
                 uart.send_serial(response)
             elif string[:2] == "@|":
                 if string[2:] and int(string[2:]) > 0:
@@ -326,7 +333,7 @@ def main():
                 response = json.dumps({"NICFrequency": int(count_interval)})
                 uart.send_serial(response)
             elif string == "?Order":
-                response = json.dumps(config["?Order"][0])
+                response = json.dumps(config["Order"])
                 uart.send_serial(response)
             elif string[:8] == "Profile|":
                 if string[8:] and int(string[8:]) in [0, 1, 2, 3, 16, 17, 18, 19]:
@@ -375,17 +382,21 @@ def main():
                     response1 = json.loads(response1)
                     for key in response1.keys():
                         dnn_dirct[key] = response1[key]
+                    response = json.dumps(dnn_dirct)
                     uart.send_serial(dnn_dirct)
                 else:
-                    uart.send_serial(dnn_default_dirct)
+                    response = json.dumps(dnn_default_dirct)
+                    uart.send_serial(response)
                 if dnn_dict2:
                     response2 = json.dumps(dnn_dict2)
                     response2 = json.loads(response2)
                     for key in response2.keys():
                         dnn_dirct[key] = response2[key]
+                    dnn_dirct = json.dumps(dnn_dirct)
                     uart.send_serial(dnn_dirct)
                 else:
-                    uart.send_serial(dnn_default_dirct)
+                    response = json.dumps(dnn_default_dirct)
+                    uart.send_serial(response)
             elif string[:3] == "?PS":
                 index = int(string[3:])
                 if index in [1, 2]:
@@ -406,12 +417,22 @@ def main():
                         awb_status = "enable"
                     else:
                         awb_status = "disable"
-                    ps_data = config[f"?PS{index}"][0]
-                    ps_data["Exposure"] = exposure
-                    ps_data["Gain"] = gain
-                    ps_data["AEModel"] = ae_status
-                    ps_data["AWBMode"] = awb_status
-                    ps_data["Time"] = current_time
+                    ps_data = {
+                        "CameraFPS": config["CameraFPS"],
+                        "ImageSize": f"{config['InputTensorWidth']}*{config['InputTensorHeith']}",
+                        "PixelDepth": config["SerialNumber"],
+                        "PixelOrder": config["PixelOrder"],
+                        "DNNModel": config["DNNModel"],
+                        "PostProcessingLogic": config["PostProcessingLogic"],
+                        "SendImageQuality": config["SendImageQuality"],
+                        "SendImageSizePercent": config["SendImageSizePercent"],
+                        "AEModel": ae_status,
+                        "Exposure": exposure,
+                        "Gain": gain,
+                        "AWBMode": awb_status,
+                        "Heating": config["Heating"],
+                        "Time": current_time
+                    }
                     response = json.dumps(ps_data)
                     uart.send_serial(response)
                 elif index in [3, 4]:
