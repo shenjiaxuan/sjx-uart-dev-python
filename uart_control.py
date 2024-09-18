@@ -443,11 +443,11 @@ def main():
                     uart.send_serial(response)
                 elif index in [3, 4]:
                     if index == 3:
-                        cam_info_socket = 'cam1_info_sock'
+                        cam_info_socket = 'cam1_dnn_sock'
                     else:
-                        cam_info_socket = 'cam2_info_sock'
+                        cam_info_socket = 'cam2_dnn_sock'
                         if cam_num == 1:
-                            cam_info_socket = 'cam1_info_sock'
+                            cam_info_socket = 'cam1_dnn_sock'
                     roi_data_g = RoiData(ROI_GET, 0, [])
                     send_data(cam_info_socket, roi_data_g.to_bytes(), log_file)
                     response = receive_data(cam_info_socket, SOCK_COMM_LEN, log_file)

@@ -81,7 +81,7 @@ if __name__ == '__main__':
         "?Order",
         "Profile|1",
         "Profile|",
-        "WiFi|0",
+        "WiFi|1",
         "WiFi|",
         "?ERR",
         "REACT|1",
@@ -125,8 +125,7 @@ if __name__ == '__main__':
             if response:
                 response_str = response.decode("utf_8", "ignore").rstrip()
                 print(time.strftime("%B-%d-%Y %H:%M:%S") + "  <-: {0}".format(response_str))
-                if response_str.startswith('?OBdata'):
-                    time.sleep(3)
+
                 if response_str.startswith('{"Block'):
                     base64_data = extract_base64_data(response_str)
                     if base64_data:
@@ -138,6 +137,8 @@ if __name__ == '__main__':
                         append_response_to_file(command, response_json)
                     except json.JSONDecodeError:
                         print(f"Failed to decode JSON for command: {command}")
+                    if response_str.startswith('?OBdata'):
+                        time.sleep(2)
             else:
                 break
 
