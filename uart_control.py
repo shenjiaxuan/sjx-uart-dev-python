@@ -252,6 +252,7 @@ def update_sim_attribute(cam_num):
 
 def main():
     global count_interval, profile_index, ener_mode
+    global IMAGE_HEIGHT, IMAGE_WIDTH
     log_folder_path = Path(LOG_FOLDER)
     log_folder_path.mkdir(parents=True, exist_ok=True)
     log_file_path = log_folder_path.joinpath(f"log_{datetime.now().strftime('%m%d%Y')}.txt")
@@ -260,6 +261,8 @@ def main():
     uart = UART(log_file)
     dnn_dirct = dnn_default_dirct.copy()
     config = load_config(CONFIG_PATH)
+    IMAGE_HEIGHT = int(config.get('InputTensorHeith'))
+    IMAGE_WIDTH = int(config.get('InputTensorWidth'))
     cam_num = int(config["SensorNum"])
     # open sockets
     cam1_info_address = ("localhost", CAMERA1_PORT)
