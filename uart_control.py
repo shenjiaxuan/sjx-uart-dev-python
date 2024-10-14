@@ -226,21 +226,23 @@ class UART:
         rcvdata = self.uartport.readline()
         return rcvdata
 
-def update_sim_attribute(cam_num):
+def update_sim_attribute(cam_in_use):
     global str_image
-    if cam_num == 1:
+    if cam_in_use == 1:
         image = Image.open('./tmp/tmp_1.bmp')
         image.save('./tmp/converted-jpg-image.jpg', optimize=True, quality=35)
-    elif cam_num == 2:
+    elif cam_in_use == 2:
+        image = Image.open('./tmp/tmp_2.bmp')
+        image.save('./tmp/converted-jpg-image.jpg', optimize=True, quality=35)
+    elif cam_in_use == 3:
         image1 = Image.open('./tmp/tmp_1.bmp')
         image2 = Image.open('./tmp/tmp_2.bmp')
+        image = Image.new('RGB', (image1.width + image2.width, max(image1.height, image2.height)))
+        image.paste(image1, (0, 0))
+        image.paste(image2, (image1.width, 0))
+        image.save('./tmp/converted-jpg-image.jpg', optimize=True, quality=10)
+    #TODO self control image size
 
-        new_image = Image.new('RGB', (image1.width + image2.width, max(image1.height, image2.height)))
-        new_image.paste(image1, (0, 0))
-        new_image.paste(image2, (image1.width, 0))
-
-        new_image.save('./tmp/converted-jpg-image.jpg', optimize=True, quality=10)
-    
     with open('./tmp/converted-jpg-image.jpg', 'rb') as image2string:
         converted_string = base64.b64encode(image2string.read()).decode()
     
@@ -263,17 +265,27 @@ def main():
     config = load_config(CONFIG_PATH)
     IMAGE_HEIGHT = int(config.get('InputTensorHeith'))
     IMAGE_WIDTH = int(config.get('InputTensorWidth'))
-    cam_num = int(config["SensorNum"])
+    # cam_in_use: left = 1, right =2, all = 3. note:left is cam1, right is cam2
+    sensor_num = config["SensorNum"]
+    if sensor_num in ["1", "left"]:
+        cam_in_use = 1
+    elif sensor_num in ["2", "right"]:
+        cam_in_use = 2
+    elif sensor_num in ["3", "all"]:
+        cam_in_use = 3
+    else:
+        log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Invalid SensorNum value: {sensor_num}\n")
     # open sockets
-    cam1_info_address = ("localhost", CAMERA1_PORT)
-    cam1_dnn_address = ("localhost", CAMERA1_DNN_PORT)
-    cam1_info_thread = Thread(target=connect_socket, args=(cam1_info_address, log_file, 'cam1_info_sock'))
-    cam1_dnn_thread = Thread(target=connect_socket, args=(cam1_dnn_address, log_file, 'cam1_dnn_sock'))
-    cam1_info_thread.daemon = True
-    cam1_dnn_thread.daemon = True
-    cam1_info_thread.start()
-    cam1_dnn_thread.start()
-    if cam_num == 2:
+    if cam_in_use == 1 or cam_in_use == 3:
+        cam1_info_address = ("localhost", CAMERA1_PORT)
+        cam1_dnn_address = ("localhost", CAMERA1_DNN_PORT)
+        cam1_info_thread = Thread(target=connect_socket, args=(cam1_info_address, log_file, 'cam1_info_sock'))
+        cam1_dnn_thread = Thread(target=connect_socket, args=(cam1_dnn_address, log_file, 'cam1_dnn_sock'))
+        cam1_info_thread.daemon = True
+        cam1_dnn_thread.daemon = True
+        cam1_info_thread.start()
+        cam1_dnn_thread.start()
+    if cam_in_use == 2 or cam_in_use == 3:
         cam2_info_address = ("localhost", CAMERA2_PORT)
         cam2_dnn_address = ("localhost", CAMERA2_DNN_PORT)
         cam2_info_thread = Thread(target=connect_socket, args=(cam2_info_address, log_file, 'cam2_info_sock'))
@@ -282,22 +294,22 @@ def main():
         cam2_dnn_thread.daemon = True
         cam2_info_thread.start()
         cam2_dnn_thread.start()
-
+        
     # open camera1 shared_memory
-    shm_name = CAMERA1_SHM_BMP_NAME
-    cam1_image_shm = open_shared_memory(shm_name)
-    if cam1_image_shm is None:
-        log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Failed to open shared memory\n")
-        return
-    cam1_image_shm_ptr = map_shared_memory(cam1_image_shm)
-    if cam1_image_shm_ptr is None:
-        log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Failed to map shared memory\n")
-        cam1_image_shm.close_fd()
-        return
-    get_pic_from_socket(cam1_image_shm_ptr, CAM1_ID)
-
-    if cam_num == 2:
-        # open camera2 shared_memory
+    if cam_in_use == 1 or cam_in_use == 3:
+        shm_name = CAMERA1_SHM_BMP_NAME
+        cam1_image_shm = open_shared_memory(shm_name)
+        if cam1_image_shm is None:
+            log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Failed to open shared memory\n")
+            return
+        cam1_image_shm_ptr = map_shared_memory(cam1_image_shm)
+        if cam1_image_shm_ptr is None:
+            log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Failed to map shared memory\n")
+            cam1_image_shm.close_fd()
+            return
+        get_pic_from_socket(cam1_image_shm_ptr, CAM1_ID)
+    # open camera2 shared_memory
+    if cam_in_use == 2 or cam_in_use == 3:
         shm_name = CAMERA2_SHM_BMP_NAME
         cam2_image_shm = open_shared_memory(shm_name)
         if cam2_image_shm is None:
@@ -310,7 +322,7 @@ def main():
             return
         get_pic_from_socket(cam2_image_shm_ptr, CAM2_ID)
 
-    update_sim_attribute(cam_num)
+    update_sim_attribute(cam_in_use)
 
     while True:
         raw_data = uart.receive_serial()
@@ -367,8 +379,9 @@ def main():
             elif string[:6] == "REACT|":
                 if string[6:] and int(string[6:]) in range(0, 27):
                     ener_mode = str(string[6:])
-                    camera_control_process('cam1_info_sock', ENERGENCY_MODE, int(string[6:]), log_file)
-                    if cam_num == 2:
+                    if cam_in_use == 1 or cam_in_use == 3:
+                        camera_control_process('cam1_info_sock', ENERGENCY_MODE, int(string[6:]), log_file)
+                    if cam_in_use == 2 or cam_in_use == 3:
                         camera_control_process('cam2_info_sock', ENERGENCY_MODE, int(string[6:]), log_file)
                 response = json.dumps({"EmergencyMode": int(ener_mode)})
                 uart.send_serial(response)
@@ -376,24 +389,31 @@ def main():
                     pass
                     ener_mode = "0"
             elif string == "?OBdata":
-                get_pic_from_socket(cam1_image_shm_ptr, CAM1_ID)
-                if cam_num == 2:
+                # save image to str_image,wait str
+                if cam_in_use == 1 or cam_in_use == 3:
+                    get_pic_from_socket(cam1_image_shm_ptr, CAM1_ID)
+                if cam_in_use == 2 or cam_in_use == 3:
                     get_pic_from_socket(cam2_image_shm_ptr, CAM2_ID)
-                update_sim_attribute(cam_num)
-                dnn_dict1 = get_dnn_date('cam1_dnn_sock', log_file)
-                if cam_num == 2:
+                #TODO put update_sim_attribute in thread to reduce processing time
+                update_sim_attribute(cam_in_use)
+
+                # get count data
+                if cam_in_use == 1 or cam_in_use == 3:
+                    dnn_dict1 = get_dnn_date('cam1_dnn_sock', log_file)
+                if cam_in_use == 2 or cam_in_use == 3:
                     dnn_dict2 = get_dnn_date('cam2_dnn_sock', log_file)
-                if dnn_dict1:
-                    response1 = json.dumps(dnn_dict1)
-                    response1 = json.loads(response1)
-                    for key in response1.keys():
-                        dnn_dirct[key] = response1[key]
-                    response = json.dumps(dnn_dirct)
-                    uart.send_serial(response)
-                else:
-                    response = json.dumps(dnn_default_dirct)
-                    uart.send_serial(response)
-                if cam_num == 2:
+                if cam_in_use == 1 or cam_in_use == 3:
+                    if dnn_dict1:
+                        response1 = json.dumps(dnn_dict1)
+                        response1 = json.loads(response1)
+                        for key in response1.keys():
+                            dnn_dirct[key] = response1[key]
+                        response = json.dumps(dnn_dirct)
+                        uart.send_serial(response)
+                    else:
+                        response = json.dumps(dnn_default_dirct)
+                        uart.send_serial(response)
+                if cam_in_use == 2 or cam_in_use == 3:
                     if dnn_dict2:
                         response2 = json.dumps(dnn_dict2)
                         response2 = json.loads(response2)
@@ -409,9 +429,11 @@ def main():
                 if index in [1, 2]:
                     if index == 1:
                         cam_info_socket = 'cam1_info_sock'
+                        if cam_in_use == 2:    # if cam1 not using,switch to cam2
+                            cam_info_socket = 'cam2_info_sock'
                     else:
                         cam_info_socket = 'cam2_info_sock'
-                        if cam_num == 1:
+                        if cam_in_use == 1:    # if cam2 not using,switch to cam1
                             cam_info_socket = 'cam1_info_sock'
                     current_time = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
                     gain = camera_control_process(cam_info_socket, GET_GAIN, 0, log_file)
@@ -447,9 +469,11 @@ def main():
                 elif index in [3, 4]:
                     if index == 3:
                         cam_info_socket = 'cam1_dnn_sock'
+                        if cam_in_use == 2:    # if cam1 not using,switch to cam2
+                            cam_info_socket = 'cam2_dnn_sock'
                     else:
                         cam_info_socket = 'cam2_dnn_sock'
-                        if cam_num == 1:
+                        if cam_in_use == 1:    # if cam2 not using,switch to cam1
                             cam_info_socket = 'cam1_dnn_sock'
                     roi_data_g = RoiData(ROI_GET, 0, [])
                     send_data(cam_info_socket, roi_data_g.to_bytes(), log_file)
