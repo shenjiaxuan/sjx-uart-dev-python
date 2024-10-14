@@ -10,7 +10,7 @@ import time
 class UART:
     def __init__(self):
         self.uartport = serial.Serial(
-                port="COM40",
+                port="COM52",
                 baudrate=38400,
                 bytesize=serial.EIGHTBITS,
                 parity=serial.PARITY_NONE,
@@ -62,10 +62,20 @@ def fix_base64_padding(data):
         data += '=' * (4 - missing_padding)
     return data
 
+# def extract_base64_data(response_str):
+#     match = re.search(r'\{"Block\d+:([^}]+)\}', response_str)
+#     if match:
+#         return match.group(1)
+#     return None
+
 def extract_base64_data(response_str):
-    match = re.search(r'\{"Block\d+:([^}]+)\}', response_str)
-    if match:
-        return match.group(1)
+    try:
+        data = json.loads(response_str)
+        for key, value in data.items():
+            if isinstance(value, str):
+                return value
+    except json.JSONDecodeError:
+        print("Error decoding JSON:", response_str)
     return None
 
 if __name__ == '__main__':
