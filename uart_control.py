@@ -230,7 +230,7 @@ def update_sim_attribute(cam_num):
     global str_image
     if cam_num == 1:
         image = Image.open('./tmp/tmp_1.bmp')
-        image.save('./tmp/converted-jpg-image.jpg', optimize=True, quality=50)
+        image.save('./tmp/converted-jpg-image.jpg', optimize=True, quality=35)
     elif cam_num == 2:
         image1 = Image.open('./tmp/tmp_1.bmp')
         image2 = Image.open('./tmp/tmp_2.bmp')
@@ -239,7 +239,7 @@ def update_sim_attribute(cam_num):
         new_image.paste(image1, (0, 0))
         new_image.paste(image2, (image1.width, 0))
 
-        new_image.save('./tmp/converted-jpg-image.jpg', optimize=True, quality=20)
+        new_image.save('./tmp/converted-jpg-image.jpg', optimize=True, quality=10)
     
     with open('./tmp/converted-jpg-image.jpg', 'rb') as image2string:
         converted_string = base64.b64encode(image2string.read()).decode()
