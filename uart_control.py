@@ -499,10 +499,14 @@ def main():
                         post_processing[f"y{i+1}"] = str(roi_data_g.y[i])
                     response = json.dumps(post_processing)
                     uart.send_serial(response)
+                elif (index - 5) < len(str_image):
+                    response = "{\"Block" + str(index - 4) + "\":\"" + str_image[index - 5] + "\"}"
+                    uart.send_serial(response)
+                elif index < 25:
+                    response = "{\"Block" + str(index - 4) + "\":\"" + "\"}"
+                    uart.send_serial(response)
                 else:
-                    if (index - 5) < len(str_image):
-                        response = "{\"Block" + str(index - 4) + ":" + str_image[index - 5] + "}"
-                        uart.send_serial(response)
+                    log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: out of Block -> ?PS{index}\n")
 
             debug_print(log_file, f"--- {time.time() - start_time} seconds ---")
 if __name__ == '__main__':
