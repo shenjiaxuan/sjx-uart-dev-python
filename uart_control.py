@@ -226,22 +226,36 @@ class UART:
         rcvdata = self.uartport.readline()
         return rcvdata
 
+def save_image_with_target_size(image, cam_in_use):
+    target_size = 10240 #Byte
+    filepath = './tmp/converted-jpg-image.jpg'
+    #quality = 20 & 35 is an experience value
+    quality = 20 if cam_in_use == 3 else 35
+    while quality > 0:
+        # save image to tmp_file. One cycle takes about 8ms
+        temp_filepath = filepath.replace('.jpg', '_temp.jpg')
+        image.save(temp_filepath, format='JPEG', quality=quality)
+        # check image size
+        if os.path.getsize(temp_filepath) <= target_size:
+            os.rename(temp_filepath, filepath)
+            return
+        quality -= 5
+    os.rename(temp_filepath, filepath)
+
 def update_sim_attribute(cam_in_use):
     global str_image
     if cam_in_use == 1:
         image = Image.open('./tmp/tmp_1.bmp')
-        image.save('./tmp/converted-jpg-image.jpg', optimize=True, quality=35)
     elif cam_in_use == 2:
         image = Image.open('./tmp/tmp_2.bmp')
-        image.save('./tmp/converted-jpg-image.jpg', optimize=True, quality=35)
     elif cam_in_use == 3:
         image1 = Image.open('./tmp/tmp_1.bmp')
         image2 = Image.open('./tmp/tmp_2.bmp')
         image = Image.new('RGB', (image1.width + image2.width, max(image1.height, image2.height)))
         image.paste(image1, (0, 0))
         image.paste(image2, (image1.width, 0))
-        image.save('./tmp/converted-jpg-image.jpg', optimize=True, quality=10)
-    #TODO self control image size
+
+    save_image_with_target_size(image, cam_in_use)
 
     with open('./tmp/converted-jpg-image.jpg', 'rb') as image2string:
         converted_string = base64.b64encode(image2string.read()).decode()
@@ -394,7 +408,6 @@ def main():
                     get_pic_from_socket(cam1_image_shm_ptr, CAM1_ID)
                 if cam_in_use == 2 or cam_in_use == 3:
                     get_pic_from_socket(cam2_image_shm_ptr, CAM2_ID)
-                #TODO put update_sim_attribute in thread to reduce processing time
                 update_sim_attribute(cam_in_use)
 
                 # get count data
