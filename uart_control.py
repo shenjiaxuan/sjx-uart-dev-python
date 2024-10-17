@@ -285,7 +285,7 @@ def main():
         cam_in_use = 1
     elif sensor_num in ["2", "right"]:
         cam_in_use = 2
-    elif sensor_num in ["3", "all"]:
+    elif sensor_num in ["3", "dual"]:
         cam_in_use = 3
     else:
         log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Invalid SensorNum value: {sensor_num}\n")
