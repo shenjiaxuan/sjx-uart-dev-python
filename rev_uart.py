@@ -7,6 +7,8 @@ import re
 import serial
 import time
 
+TEST_RUN_COUNT = 100
+
 class UART:
     def __init__(self):
         self.uartport = serial.Serial(
@@ -61,12 +63,6 @@ def fix_base64_padding(data):
     if missing_padding != 0:
         data += '=' * (4 - missing_padding)
     return data
-
-# def extract_base64_data(response_str):
-#     match = re.search(r'\{"Block\d+:([^}]+)\}', response_str)
-#     if match:
-#         return match.group(1)
-#     return None
 
 def extract_base64_data(response_str):
     try:
@@ -125,36 +121,38 @@ if __name__ == '__main__':
 
     uart = UART()
 
-    image_data_list = []
+    for run in range(TEST_RUN_COUNT):
+        print(f"Running test iteration {run + 1}/{TEST_RUN_COUNT}")
+        image_data_list = []
 
-    for command in commands:
-        uart.send_serial(command)
-        time.sleep(0.5)
-        while True:
-            response = uart.receive_serial()
-            if response:
-                response_str = response.decode("utf_8", "ignore").rstrip()
-                print(time.strftime("%B-%d-%Y %H:%M:%S") + "  <-: {0}".format(response_str))
+        for command in commands:
+            uart.send_serial(command)
+            time.sleep(0.5)
+            while True:
+                response = uart.receive_serial()
+                if response:
+                    response_str = response.decode("utf_8", "ignore").rstrip()
+                    print(time.strftime("%B-%d-%Y %H:%M:%S") + "  <-: {0}".format(response_str))
 
-                if response_str.startswith('{"Block'):
-                    base64_data = extract_base64_data(response_str)
-                    if base64_data:
-                        image_data_list.append(base64_data)
-                    append_response_to_file(command, {"image_data_received": True})
+                    if response_str.startswith('{"Block'):
+                        base64_data = extract_base64_data(response_str)
+                        if base64_data:
+                            image_data_list.append(base64_data)
+                        append_response_to_file(command, {"image_data_received": True})
+                    else:
+                        try:
+                            response_json = json.loads(response_str)
+                            append_response_to_file(command, response_json)
+                        except json.JSONDecodeError:
+                            print(f"Failed to decode JSON for command: {command}")
+                        if response_str.startswith('?OBdata'):
+                            time.sleep(2)
                 else:
-                    try:
-                        response_json = json.loads(response_str)
-                        append_response_to_file(command, response_json)
-                    except json.JSONDecodeError:
-                        print(f"Failed to decode JSON for command: {command}")
-                    if response_str.startswith('?OBdata'):
-                        time.sleep(2)
-            else:
-                break
+                    break
 
-    if image_data_list:
-        combined_image_data = ''.join(image_data_list)
-        combined_image_data = fix_base64_padding(combined_image_data)
-        save_image(combined_image_data, "combined_image.bmp")
+        if image_data_list:
+            combined_image_data = ''.join(image_data_list)
+            combined_image_data = fix_base64_padding(combined_image_data)
+            save_image(combined_image_data, f"combined_image_{run + 1}.bmp")
 
-    time.sleep(1)
+        time.sleep(1)
