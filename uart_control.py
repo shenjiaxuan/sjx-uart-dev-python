@@ -464,7 +464,7 @@ def main():
                     ps_data = {
                         "CameraFPS": config["CameraFPS"],
                         "ImageSize": f"{config['InputTensorWidth']}*{config['InputTensorHeith']}",
-                        "PixelDepth": config["SerialNumber"],
+                        "PixelDepth": config["PixelDepth"],
                         "PixelOrder": config["PixelOrder"],
                         "DNNModel": config["DNNModel"],
                         "PostProcessingLogic": config["PostProcessingLogic"],
