@@ -7,13 +7,13 @@ import re
 import serial
 import time
 
-TEST_RUN_COUNT = 100
+TEST_RUN_COUNT = 1
 
 class UART:
     def __init__(self):
         self.uartport = serial.Serial(
-                port="COM52",
-                baudrate=38400,
+                port="COM4",
+                baudrate=115200,
                 bytesize=serial.EIGHTBITS,
                 parity=serial.PARITY_NONE,
                 stopbits=serial.STOPBITS_ONE,
@@ -145,8 +145,8 @@ if __name__ == '__main__':
                             append_response_to_file(command, response_json)
                         except json.JSONDecodeError:
                             print(f"Failed to decode JSON for command: {command}")
-                        if response_str.startswith('?OBdata'):
-                            time.sleep(2)
+                        if command == "?OBdata":
+                            time.sleep(2) # delay for esp32 image processing
                 else:
                     break
 
