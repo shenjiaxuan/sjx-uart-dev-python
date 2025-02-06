@@ -29,7 +29,7 @@ DEBUG = False
 
 send_max_length = 980
 count_interval = "300"
-profile_index = "3"
+profile_index = 3
 ener_mode = "0"
 send_time = 0
 str_image = []
@@ -283,10 +283,13 @@ def main():
     sensor_num = config["SensorNum"]
     if sensor_num in ["1", "left"]:
         cam_in_use = 1
+        profile_index = 1
     elif sensor_num in ["2", "right"]:
         cam_in_use = 2
+        profile_index = 2
     elif sensor_num in ["3", "dual"]:
         cam_in_use = 3
+        profile_index = 3
     else:
         log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Invalid SensorNum value: {sensor_num}\n")
     # open sockets
@@ -365,10 +368,21 @@ def main():
                 response = json.dumps(config["Order"])
                 uart.send_serial(response)
             elif string[:8] == "Profile|":
-                if string[8:] and int(string[8:]) in [0, 1, 2, 3, 16, 17, 18, 19]:
-                    profile_index = str(string[8:])
+                if string[8:] and int(string[8:]) in [1, 2, 3]:
+                    profile_index = int(string[8:])
                 response = json.dumps({"CamProfile": int(profile_index)})
                 uart.send_serial(response)
+                if int(profile_index) != cam_in_use:
+                    if int(profile_index) == 1:
+                        config["SensorNum"] = "left"
+                    elif int(profile_index) == 2:
+                        config["SensorNum"] = "right"
+                    elif int(profile_index) == 3:
+                        config["SensorNum"] = "dual"
+                    with open(CONFIG_PATH, "w", encoding="utf-8") as file:
+                        json.dump(config, file, indent=4)
+                    subprocess.call("reboot", shell=True)
+
             elif string[:5] == "WiFi|":
                 if get_wifi_status() == 'enabled':
                     wifi_cur_config = 1
