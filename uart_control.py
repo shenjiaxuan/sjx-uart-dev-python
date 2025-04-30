@@ -360,7 +360,7 @@ def main():
                 response = json.dumps(asset_data)
                 uart.send_serial(response)
             elif string[:2] == "@|":
-                if string[2:] and int(string[2:]) > 0:
+                if string[2:]:
                     count_interval = str(string[2:])
                 response = json.dumps({"NICFrequency": int(count_interval)})
                 uart.send_serial(response)
