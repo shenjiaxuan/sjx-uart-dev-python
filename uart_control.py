@@ -14,6 +14,7 @@ import posix_ipc
 import os
 from threading import Thread
 from socket_def import *
+import random
 
 CAMERA1_DIAGNOSE_INFO_PATH = "/home/root/AglaiaSense/resource/share_config/diagnose_info_1.json"
 CAMERA2_DIAGNOSE_INFO_PATH = "/home/root/AglaiaSense/resource/share_config/diagnose_info_2.json"
@@ -34,7 +35,7 @@ ener_mode = "0"
 send_time = 0
 str_image = []
 
-dnn_default_dirct = {"spdunit":"MPH","incar":0,"incarspd":-1,"inbus":0,"inbusspd":-1,"inped":0,"inpedspd":-1,"incycle":0,"incyclespd":-1,"intruck":0,"intruckspd":-1,"outcar":0,"outcarspd":-1,"outbus":0,"outbusspd":-1,"outped":0,"outpedspd":-1,"outcycle":0,"outcyclespd":-1,"outtruck":0,"outtruckspd":-1}
+dnn_default_dirct = {"spdunit":"MPH","incar":-1,"incarspd":-1,"inbus":-1,"inbusspd":-1,"inped":-1,"inpedspd":-1,"incycle":-1,"incyclespd":-1,"intruck":-1,"intruckspd":-1,"outcar":-1,"outcarspd":-1,"outbus":-1,"outbusspd":-1,"outped":-1,"outpedspd":-1,"outcycle":-1,"outcyclespd":-1,"outtruck":-1,"outtruckspd":-1}
 sockets = {
     'cam1_info_sock': None,
     'cam2_info_sock': None,
@@ -266,6 +267,38 @@ def update_sim_attribute(cam_in_use):
     for x in range(send_time):
         str_image.append(converted_string[x * send_max_length:(x + 1) * send_max_length])
 
+def update_speeds_with_prefix(dnn_dict):
+    # different types of speed ranges
+    speed_ranges = {
+        "car": (20, 70),
+        "bus": (30, 60),
+        "cycle": (5, 20),
+        "truck": (40, 80),
+        "ped": (2, 10)
+    }
+    prefixes = ['in', 'out']
+
+    for key in dnn_dict.keys():
+        # find the count field: no spd suffix, and starts with in or out
+        if key.startswith(tuple(prefixes)) and not key.endswith('spd'):
+            count = dnn_dict.get(key, -1)
+            # get the vehicle type by removing the prefix
+            vehicle_type = None
+            for prefix in prefixes:
+                if key.startswith(prefix):
+                    vehicle_type = key[len(prefix):]
+                    break
+            if vehicle_type not in speed_ranges:
+                continue
+
+            speed_key = key + "spd"
+            if count > 0:
+                low, high = speed_ranges[vehicle_type]
+                dnn_dict[speed_key] = random.randint(low, high)
+            else:
+                dnn_dict[speed_key] = 0
+    return dnn_dict
+
 def main():
     global count_interval, profile_index, ener_mode
     global IMAGE_HEIGHT, IMAGE_WIDTH
@@ -435,6 +468,7 @@ def main():
                         response1 = json.loads(response1)
                         for key in response1.keys():
                             dnn_dirct[key] = response1[key]
+                        dnn_dirct = update_speeds_with_prefix(dnn_dirct)
                         response = json.dumps(dnn_dirct)
                         uart.send_serial(response)
                     else:
@@ -446,6 +480,7 @@ def main():
                         response2 = json.loads(response2)
                         for key in response2.keys():
                             dnn_dirct[key] = response2[key]
+                        dnn_dirct = update_speeds_with_prefix(dnn_dirct)
                         response = json.dumps(dnn_dirct)
                         uart.send_serial(response)
                     else:
