@@ -16,6 +16,10 @@ from threading import Thread
 from socket_def import *
 import random
 
+import logging
+from logging.handlers import RotatingFileHandler
+import sys
+
 CAMERA1_DIAGNOSE_INFO_PATH = "/home/root/AglaiaSense/resource/share_config/diagnose_info_1.json"
 CAMERA2_DIAGNOSE_INFO_PATH = "/home/root/AglaiaSense/resource/share_config/diagnose_info_2.json"
 LOG_FOLDER = "log"
@@ -26,13 +30,11 @@ CAM2_ID = 2
 IMAGE_CHANNELS = 3
 IMAGE_HEIGHT = 300
 IMAGE_WIDTH = 300
-DEBUG = False
 
 send_max_length = 980
 count_interval = "300"
 profile_index = 3
 ener_mode = "0"
-send_time = 0
 str_image = []
 
 dnn_default_dirct = {"spdunit":"MPH","incar":-1,"incarspd":-1,"inbus":-1,"inbusspd":-1,"inped":-1,"inpedspd":-1,"incycle":-1,"incyclespd":-1,"intruck":-1,"intruckspd":-1,"outcar":-1,"outcarspd":-1,"outbus":-1,"outbusspd":-1,"outped":-1,"outpedspd":-1,"outcycle":-1,"outcyclespd":-1,"outtruck":-1,"outtruckspd":-1}
@@ -43,13 +45,27 @@ sockets = {
     'cam2_dnn_sock': None
 }
 
-def debug_print(log_file, *args, **kwargs):
-    if DEBUG:
-        message = ' '.join(map(str, args))
-        log_file.write(f"[info][{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: {message}\n")
-        log_file.flush()
+def setup_logger(log_file_path):
+    logger = logging.getLogger("uart_logger")
+    logger.setLevel(logging.DEBUG)
+    formatter = logging.Formatter(fmt="%(asctime)s [%(levelname)s]: %(message)s",
+                                  datefmt="%m/%d/%Y %H:%M:%S")
 
-def connect_socket(server_address, log_file, socket_key):
+    file_handler = RotatingFileHandler(log_file_path, maxBytes=10*1024*1024, backupCount=3)
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(logging.DEBUG)
+
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(logging.DEBUG)
+
+    if not logger.hasHandlers():
+        logger.addHandler(file_handler)
+        logger.addHandler(console_handler)
+
+    return logger
+
+def connect_socket(server_address, logger, socket_key):
     while True:
         if sockets[socket_key] is not None:
             time.sleep(1)  # If the connection exists, wait briefly
@@ -59,47 +75,37 @@ def connect_socket(server_address, log_file, socket_key):
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.connect(server_address)
             sockets[socket_key] = sock
-            log_file.write(
-                f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Connected to server at {server_address}\n"
-            )
+            logger.info(f"Connected to server at {server_address}")
         except socket.error as e:
-            log_file.write(
-                f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Failed to connect to server: {e}. Retrying in 5 seconds...\n"
-            )
+            logger.error(f"Failed to connect to server: {e}. Retrying in 5 seconds...")
             time.sleep(5)  # Wait 5 seconds and try again
 
-def send_data(socket_key, data, log_file):
+def send_data(socket_key, data, logger):
     sock = sockets[socket_key]
     if sock is None:
-        log_file.write("No active socket connection. Cannot send data.\n")
+        logger.error("No active socket connection. Cannot send data.")
         return
     
     try:
         sock.sendall(data)
     except socket.error as e:
-        log_file.write(
-            f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Send error: {e}. Setting {socket_key} to None.\n"
-        )
+        logger.error(f"Send error: {e}. Setting {socket_key} to None.")
         sockets[socket_key] = None
 
-def receive_data(socket_key, buffer_size=SOCK_COMM_LEN, log_file=None):
+def receive_data(socket_key, buffer_size=SOCK_COMM_LEN, logger=None):
     sock = sockets[socket_key]
     if sock is None:
-        log_file.write("No active socket connection. Cannot receive data.\n")
+        logger.error("No active socket connection. Cannot receive data.")
         return None
     
     try:
         response = sock.recv(buffer_size)
         if not response:
-            log_file.write(
-                f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Receive None: Setting {socket_key} to None.\n"
-            )
+            logger.error(f"Receive None: Setting {socket_key} to None.")
             sockets[socket_key] = None
         return response
     except socket.error as e:
-        log_file.write(
-            f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Receive error: {e}. Setting {socket_key} to None.\n"
-        )
+        logger.error(f"Receive error: {e}. Setting {socket_key} to None.")
         sockets[socket_key] = None
         return None
 
@@ -107,7 +113,7 @@ def open_shared_memory(shm_name):
     try:
         shm = posix_ipc.SharedMemory(shm_name, posix_ipc.O_RDWR)
         return shm
-    except posix_ipc.Error as e:
+    except posix_ipc.Error:
         return None
 
 def map_shared_memory(shm):
@@ -128,65 +134,68 @@ def get_pic_from_socket(shm_ptr, cam_id):
     tmp_image_path.parent.mkdir(parents=True, exist_ok=True)
     image.save(tmp_image_path)
 
-def get_dnn_date(socket_key, log_file):
+def get_dnn_date(socket_key, logger):
     dnn_data_request = DnnDataYolo(cmd=DNN_GET)
-    send_data(socket_key, dnn_data_request.to_bytes(), log_file)
-    response = receive_data(socket_key, SOCK_COMM_LEN, log_file)
+    send_data(socket_key, dnn_data_request.to_bytes(), logger)
+    response = receive_data(socket_key, SOCK_COMM_LEN, logger)
     if response:
-        json_response = response.decode('utf-8')
-        dnn_dict = DnnDataYolo.from_json(json_response)
-        return dnn_dict
+        try:
+            json_response = response.decode('utf-8')
+            dnn_dict = DnnDataYolo.from_json(json_response)
+            return dnn_dict
+        except Exception as e:
+            logger.error(f"Failed to decode or parse DNN data: {e}")
+            return None
     else:
         return None
 
-def camera_control_process(socket_key, command, contol_val, log_file):
+def camera_control_process(socket_key, command, contol_val, logger):
     try:
         if command == GET_GAIN:
             gain_data_g = GainData(command)
-            send_data(socket_key, gain_data_g.to_bytes(), log_file)
-            response = receive_data(socket_key, SOCK_COMM_LEN, log_file)
+            send_data(socket_key, gain_data_g.to_bytes(), logger)
+            response = receive_data(socket_key, SOCK_COMM_LEN, logger)
             if response:
                 gain_data_g = GainData.from_bytes(response)
             return gain_data_g.val
 
         elif command == GET_EXPOSURE:
             exposure_data_g = ExposureData(command)
-            send_data(socket_key, exposure_data_g.to_bytes(), log_file)
-            response = receive_data(socket_key, SOCK_COMM_LEN, log_file)
+            send_data(socket_key, exposure_data_g.to_bytes(), logger)
+            response = receive_data(socket_key, SOCK_COMM_LEN, logger)
             if response:
                 exposure_data_g = ExposureData.from_bytes(response)
             return exposure_data_g.val
 
         elif command == GET_AE_MODE:
             ae_mode_data_g = AeModeData(command)
-            send_data(socket_key, ae_mode_data_g.to_bytes(), log_file)
-            response = receive_data(socket_key, SOCK_COMM_LEN, log_file)
-            # response = cam_socket.recv(SOCK_COMM_LEN)
+            send_data(socket_key, ae_mode_data_g.to_bytes(), logger)
+            response = receive_data(socket_key, SOCK_COMM_LEN, logger)
             if response:
                 ae_mode_data_g = AeModeData.from_bytes(response)
             return ae_mode_data_g.val
 
         elif command == GET_AWB_MODE:
             awb_mode_data_g = AwbModeData(command)
-            send_data(socket_key, awb_mode_data_g.to_bytes(), log_file)
-            response = receive_data(socket_key, SOCK_COMM_LEN, log_file)
+            send_data(socket_key, awb_mode_data_g.to_bytes(), logger)
+            response = receive_data(socket_key, SOCK_COMM_LEN, logger)
             if response:
                 awb_mode_data_g = AwbModeData.from_bytes(response)
             return awb_mode_data_g.val
         elif command == CAM_EN:
             cam_en = CamEn(command, contol_val)
-            send_data(socket_key, cam_en.to_bytes(), log_file)
+            send_data(socket_key, cam_en.to_bytes(), logger)
         elif command == ENERGENCY_MODE:
             energency_mode = EnergencyMode(command, contol_val)
-            send_data(socket_key, energency_mode.to_bytes(), log_file)
+            send_data(socket_key, energency_mode.to_bytes(), logger)
         else:
-            log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Camera command error: {hex(command)}\n")
+            logger.error(f"Camera command error: {hex(command)}")
     except socket.timeout:
-        log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Socket timed out waiting for response for command: {hex(command)}\n")
+        logger.error(f"Socket timed out waiting for response for command: {hex(command)}")
     except socket.error as e:
-        log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Socket error for command: {hex(command)}, error: {e}\n")
+        logger.error(f"Socket error for command: {hex(command)}, error: {e}")
     except Exception as e:
-        log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Unexpected error for command: {hex(command)}, error: {e}\n")
+        logger.error(f"Unexpected error for command: {hex(command)}, error: {e}")
 
 def load_config(path):
     with open(path, 'r') as file:
@@ -204,8 +213,8 @@ def check_camera_errors(path):
         return "1"
 
 class UART:
-    def __init__(self, log_file):
-        self.log_file = log_file
+    def __init__(self, logger):
+        self.logger = logger
         self.uartport = serial.Serial(
                 port="/dev/ttymxc2",
                 baudrate=38400,
@@ -220,19 +229,20 @@ class UART:
 
     def send_serial(self, cmd): 
         cmd = str(cmd).rstrip()
-        debug_print(self.log_file, time.strftime("%B-%d-%Y %H:%M:%S") + "  ->: {0}".format(cmd))
+        self.logger.debug(f"UART send ->: {cmd}")
         self.uartport.write((cmd+"\n").encode("utf_8"))
 
     def receive_serial(self):
         rcvdata = self.uartport.readline()
         return rcvdata
 
-def save_image_with_target_size(image, cam_in_use):
+def save_image_with_target_size(image, cam_in_use, logger):
     target_size = 10240 #Byte
     filepath = './tmp/converted-jpg-image.jpg'
     #quality = 20 & 35 is an experience value
     quality = 20 if cam_in_use == 3 else 35
     while quality > 0:
+        logger.debug(f"*******************Quality: {quality}")
         # save image to tmp_file. One cycle takes about 8ms
         temp_filepath = filepath.replace('.jpg', '_temp.jpg')
         image.save(temp_filepath, format='JPEG', quality=quality)
@@ -243,7 +253,7 @@ def save_image_with_target_size(image, cam_in_use):
         quality -= 5
     os.rename(temp_filepath, filepath)
 
-def update_sim_attribute(cam_in_use):
+def update_sim_attribute(cam_in_use, logger):
     global str_image
     if cam_in_use == 1:
         image = Image.open('./tmp/tmp_1.bmp')
@@ -256,7 +266,7 @@ def update_sim_attribute(cam_in_use):
         image.paste(image1, (0, 0))
         image.paste(image2, (image1.width, 0))
 
-    save_image_with_target_size(image, cam_in_use)
+    save_image_with_target_size(image, cam_in_use, logger)
 
     with open('./tmp/converted-jpg-image.jpg', 'rb') as image2string:
         converted_string = base64.b64encode(image2string.read()).decode()
@@ -304,10 +314,9 @@ def main():
     global IMAGE_HEIGHT, IMAGE_WIDTH
     log_folder_path = Path(LOG_FOLDER)
     log_folder_path.mkdir(parents=True, exist_ok=True)
-    log_file_path = log_folder_path.joinpath(f"log_{datetime.now().strftime('%m%d%Y')}.txt")
-    log_file_path.touch(exist_ok=True)
-    log_file = open(log_file_path, 'a')
-    uart = UART(log_file)
+    log_file_path = log_folder_path.joinpath("uart_log.txt")
+    logger = setup_logger(log_file_path)
+    uart = UART(logger)
     dnn_dirct = dnn_default_dirct.copy()
     config = load_config(CONFIG_PATH)
     IMAGE_HEIGHT = int(config.get('InputTensorHeith'))
@@ -324,13 +333,14 @@ def main():
         cam_in_use = 3
         profile_index = 3
     else:
-        log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Invalid SensorNum value: {sensor_num}\n")
-    # open sockets
+        logger.error(f"Invalid SensorNum value: {sensor_num}")
+        cam_in_use = 1
+
     if cam_in_use == 1 or cam_in_use == 3:
         cam1_info_address = ("localhost", CAMERA1_PORT)
         cam1_dnn_address = ("localhost", CAMERA1_DNN_PORT)
-        cam1_info_thread = Thread(target=connect_socket, args=(cam1_info_address, log_file, 'cam1_info_sock'))
-        cam1_dnn_thread = Thread(target=connect_socket, args=(cam1_dnn_address, log_file, 'cam1_dnn_sock'))
+        cam1_info_thread = Thread(target=connect_socket, args=(cam1_info_address, logger, 'cam1_info_sock'))
+        cam1_dnn_thread = Thread(target=connect_socket, args=(cam1_dnn_address, logger, 'cam1_dnn_sock'))
         cam1_info_thread.daemon = True
         cam1_dnn_thread.daemon = True
         cam1_info_thread.start()
@@ -338,8 +348,8 @@ def main():
     if cam_in_use == 2 or cam_in_use == 3:
         cam2_info_address = ("localhost", CAMERA2_PORT)
         cam2_dnn_address = ("localhost", CAMERA2_DNN_PORT)
-        cam2_info_thread = Thread(target=connect_socket, args=(cam2_info_address, log_file, 'cam2_info_sock'))
-        cam2_dnn_thread = Thread(target=connect_socket, args=(cam2_dnn_address, log_file, 'cam2_dnn_sock'))
+        cam2_info_thread = Thread(target=connect_socket, args=(cam2_info_address, logger, 'cam2_info_sock'))
+        cam2_dnn_thread = Thread(target=connect_socket, args=(cam2_dnn_address, logger, 'cam2_dnn_sock'))
         cam2_info_thread.daemon = True
         cam2_dnn_thread.daemon = True
         cam2_info_thread.start()
@@ -350,36 +360,35 @@ def main():
         shm_name = CAMERA1_SHM_BMP_NAME
         cam1_image_shm = open_shared_memory(shm_name)
         if cam1_image_shm is None:
-            log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Failed to open shared memory\n")
+            logger.error("Failed to open shared memory for cam1")
             return
         cam1_image_shm_ptr = map_shared_memory(cam1_image_shm)
         if cam1_image_shm_ptr is None:
-            log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Failed to map shared memory\n")
+            logger.error("Failed to map shared memory for cam1")
             cam1_image_shm.close_fd()
             return
         get_pic_from_socket(cam1_image_shm_ptr, CAM1_ID)
-    # open camera2 shared_memory
     if cam_in_use == 2 or cam_in_use == 3:
         shm_name = CAMERA2_SHM_BMP_NAME
         cam2_image_shm = open_shared_memory(shm_name)
         if cam2_image_shm is None:
-            log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Failed to open shared memory\n")
+            logger.error("Failed to open shared memory for cam2")
             return
         cam2_image_shm_ptr = map_shared_memory(cam2_image_shm)
         if cam2_image_shm_ptr is None:
-            log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: Failed to map shared memory\n")
+            logger.error("Failed to map shared memory for cam2")
             cam2_image_shm.close_fd()
             return
         get_pic_from_socket(cam2_image_shm_ptr, CAM2_ID)
 
-    update_sim_attribute(cam_in_use)
+    update_sim_attribute(cam_in_use, logger)
 
     while True:
         raw_data = uart.receive_serial()
         if raw_data:
             start_time = time.time()
             string = raw_data.decode("utf_8", "ignore").rstrip()
-            debug_print(log_file, f"{datetime.now().strftime('%B-%d-%Y %H:%M:%S')}  <-: {string}")
+            logger.debug(f"UART recv <-: {string}")
             if string == "?Asset":
                 asset_data = {
                     "MfrName": config["MfrName"],
@@ -441,9 +450,9 @@ def main():
                 if string[6:] and int(string[6:]) in range(0, 27):
                     ener_mode = str(string[6:])
                     if cam_in_use == 1 or cam_in_use == 3:
-                        camera_control_process('cam1_info_sock', ENERGENCY_MODE, int(string[6:]), log_file)
+                        camera_control_process('cam1_info_sock', ENERGENCY_MODE, int(string[6:]), logger)
                     if cam_in_use == 2 or cam_in_use == 3:
-                        camera_control_process('cam2_info_sock', ENERGENCY_MODE, int(string[6:]), log_file)
+                        camera_control_process('cam2_info_sock', ENERGENCY_MODE, int(string[6:]), logger)
                 response = json.dumps({"EmergencyMode": int(ener_mode)})
                 uart.send_serial(response)
                 if int(ener_mode) in range(0, 27):
@@ -459,9 +468,9 @@ def main():
 
                 # get count data
                 if cam_in_use == 1 or cam_in_use == 3:
-                    dnn_dict1 = get_dnn_date('cam1_dnn_sock', log_file)
+                    dnn_dict1 = get_dnn_date('cam1_dnn_sock', logger)
                 if cam_in_use == 2 or cam_in_use == 3:
-                    dnn_dict2 = get_dnn_date('cam2_dnn_sock', log_file)
+                    dnn_dict2 = get_dnn_date('cam2_dnn_sock', logger)
                 if cam_in_use == 1 or cam_in_use == 3:
                     if dnn_dict1:
                         response1 = json.dumps(dnn_dict1)
@@ -491,17 +500,17 @@ def main():
                 if index in [1, 2]:
                     if index == 1:
                         cam_info_socket = 'cam1_info_sock'
-                        if cam_in_use == 2:    # if cam1 not using,switch to cam2
+                        if cam_in_use == 2:
                             cam_info_socket = 'cam2_info_sock'
                     else:
                         cam_info_socket = 'cam2_info_sock'
-                        if cam_in_use == 1:    # if cam2 not using,switch to cam1
+                        if cam_in_use == 1:
                             cam_info_socket = 'cam1_info_sock'
                     current_time = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-                    gain = camera_control_process(cam_info_socket, GET_GAIN, 0, log_file)
-                    exposure = camera_control_process(cam_info_socket, GET_EXPOSURE, 0, log_file)
-                    ae_model = camera_control_process(cam_info_socket, GET_AE_MODE, 0, log_file)
-                    awb_model = camera_control_process(cam_info_socket, GET_AWB_MODE, 0, log_file)
+                    gain = camera_control_process(cam_info_socket, GET_GAIN, 0, logger)
+                    exposure = camera_control_process(cam_info_socket, GET_EXPOSURE, 0, logger)
+                    ae_model = camera_control_process(cam_info_socket, GET_AE_MODE, 0, logger)
+                    awb_model = camera_control_process(cam_info_socket, GET_AWB_MODE, 0, logger)
                     if ae_model == 0:
                         ae_status = "auto"
                     else:
@@ -531,15 +540,15 @@ def main():
                 elif index in [3, 4]:
                     if index == 3:
                         cam_info_socket = 'cam1_dnn_sock'
-                        if cam_in_use == 2:    # if cam1 not using,switch to cam2
+                        if cam_in_use == 2:
                             cam_info_socket = 'cam2_dnn_sock'
                     else:
                         cam_info_socket = 'cam2_dnn_sock'
-                        if cam_in_use == 1:    # if cam2 not using,switch to cam1
+                        if cam_in_use == 1:
                             cam_info_socket = 'cam1_dnn_sock'
                     roi_data_g = RoiData(ROI_GET, 0, [])
-                    send_data(cam_info_socket, roi_data_g.to_bytes(), log_file)
-                    response = receive_data(cam_info_socket, SOCK_COMM_LEN, log_file)
+                    send_data(cam_info_socket, roi_data_g.to_bytes(), logger)
+                    response = receive_data(cam_info_socket, SOCK_COMM_LEN, logger)
                     if response:
                         roi_data_g = RoiData.from_bytes(response)
                     post_processing = {}
@@ -555,8 +564,9 @@ def main():
                     response = "{\"Block" + str(index - 4) + "\":\"" + "\"}"
                     uart.send_serial(response)
                 else:
-                    log_file.write(f"[{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}]: out of Block -> ?PS{index}\n")
+                    logger.error(f"out of Block -> ?PS{index}")
 
-            debug_print(log_file, f"--- {time.time() - start_time} seconds ---")
+            logger.debug(f"--- {time.time() - start_time} seconds ---")
+
 if __name__ == '__main__':
     main()
