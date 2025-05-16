@@ -237,7 +237,7 @@ class UART:
         return rcvdata
 
 def save_image_with_target_size(image, cam_in_use, logger):
-    target_size = 10240 #Byte
+    target_size = 12800 #12800 #10240 # 15360 #Bytes
     filepath = './tmp/converted-jpg-image.jpg'
     #quality = 20 & 35 is an experience value
     quality = 20 if cam_in_use == 3 else 35
