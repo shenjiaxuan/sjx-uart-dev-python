@@ -13,6 +13,7 @@ import mmap
 import posix_ipc
 import os
 from threading import Thread
+import threading
 from socket_def import *
 import random
 
@@ -34,8 +35,9 @@ IMAGE_WIDTH = 300
 send_max_length = 980
 count_interval = "300"
 profile_index = 3
-ener_mode = "0"
+emer_mode = 0  # corrected from ener_mode
 str_image = []
+emer_imgage_send = 0
 
 dnn_default_dirct = {"spdunit":"MPH","incar":-1,"incarspd":-1,"inbus":-1,"inbusspd":-1,"inped":-1,"inpedspd":-1,"incycle":-1,"incyclespd":-1,"intruck":-1,"intruckspd":-1,"outcar":-1,"outcarspd":-1,"outbus":-1,"outbusspd":-1,"outped":-1,"outpedspd":-1,"outcycle":-1,"outcyclespd":-1,"outtruck":-1,"outtruckspd":-1}
 sockets = {
@@ -44,6 +46,11 @@ sockets = {
     'cam1_dnn_sock': None,
     'cam2_dnn_sock': None
 }
+
+# Declare globals for shared memory pointers and cam_in_use to be accessible in emer_mode_server
+cam1_image_shm_ptr = None
+cam2_image_shm_ptr = None
+cam_in_use = 1
 
 def setup_logger(log_file_path):
     logger = logging.getLogger("uart_logger")
@@ -92,7 +99,7 @@ def send_data(socket_key, data, logger):
         logger.error(f"Send error: {e}. Setting {socket_key} to None.")
         sockets[socket_key] = None
 
-def receive_data(socket_key, buffer_size=SOCK_COMM_LEN, logger=None):
+def receive_data(socket_key, buffer_size, logger):
     sock = sockets[socket_key]
     if sock is None:
         logger.error("No active socket connection. Cannot receive data.")
@@ -255,6 +262,8 @@ def save_image_with_target_size(image, cam_in_use, logger):
 
 def update_sim_attribute(cam_in_use, logger):
     global str_image
+    if emer_imgage_send == 1:
+        return
     if cam_in_use == 1:
         image = Image.open('./tmp/tmp_1.bmp')
     elif cam_in_use == 2:
@@ -309,9 +318,69 @@ def update_speeds_with_prefix(dnn_dict):
                 dnn_dict[speed_key] = 0
     return dnn_dict
 
+def handle_emer_mode_client(client_sock, addr, logger):
+    """
+    Handle communication with one EmergenMode client.
+    Keep receiving until client disconnects.
+    """
+    global emer_mode, cam_in_use, cam1_image_shm_ptr, cam2_image_shm_ptr
+    logger.info(f"Handling EmergenMode client from {addr}")
+    try:
+        while True:
+            data = client_sock.recv(1024)
+            if not data:
+                logger.info(f"Client {addr} disconnected")
+                break  # client closed connection
+
+            try:
+                msg = json.loads(data.decode('utf-8'))
+                if 'EmergMode' in msg:
+                    emer_mode = int(msg['EmergMode'])
+                    logger.info(f"emer_mode set to {emer_mode} by socket message")
+                    if emer_mode == 1:
+                        # Save images to buffer when emer_mode is set to 1
+                        if cam_in_use == 1 or cam_in_use == 3:
+                            get_pic_from_socket(cam1_image_shm_ptr, CAM1_ID)
+                        if cam_in_use == 2 or cam_in_use == 3:
+                            get_pic_from_socket(cam2_image_shm_ptr, CAM2_ID)
+                        update_sim_attribute(cam_in_use, logger)
+            except Exception as e:
+                logger.error(f"Failed to parse EmergenMode json: {e}")
+    except Exception as e:
+        logger.error(f"Error handling EmergenMode client: {e}")
+    finally:
+        client_sock.close()
+        logger.info(f"EmergenMode client from {addr} connection closed")
+
+
+def emer_mode_server(host, port, logger):
+    """
+    Multi-threaded Socket server to listen for {"EmergMode": 1} JSON messages.
+    Each client connection handled in a separate thread.
+    """
+    server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server_sock.bind((host, port))
+    server_sock.listen(5)  # backlog 5
+    logger.info(f"EmergMode server listening on {host}:{port}")
+
+    while True:
+        client_sock, addr = server_sock.accept()
+        logger.info(f"EmergMode client connected from {addr}")
+        client_thread = threading.Thread(target=handle_emer_mode_client, args=(client_sock, addr, logger))
+        client_thread.daemon = True
+        client_thread.start()
+
 def main():
-    global count_interval, profile_index, ener_mode
-    global IMAGE_HEIGHT, IMAGE_WIDTH
+    """
+    Main function to initialize logger, UART, load config, start socket connection
+    and emer_mode server thread, and handle UART commands.
+    """
+    global count_interval, profile_index, emer_mode
+    global IMAGE_HEIGHT, IMAGE_WIDTH, cam_in_use
+    global cam1_image_shm_ptr, cam2_image_shm_ptr
+    global emer_imgage_send
+
     log_folder_path = Path(LOG_FOLDER)
     log_folder_path.mkdir(parents=True, exist_ok=True)
     log_file_path = log_folder_path.joinpath("uart_log.txt")
@@ -336,6 +405,11 @@ def main():
         logger.error(f"Invalid SensorNum value: {sensor_num}")
         cam_in_use = 1
 
+    # Start emer_mode socket server thread
+    emer_mode_thread = threading.Thread(target=emer_mode_server, args=('127.0.0.1', 5555, logger))
+    emer_mode_thread.daemon = True
+    emer_mode_thread.start()
+
     if cam_in_use == 1 or cam_in_use == 3:
         cam1_info_address = ("localhost", CAMERA1_PORT)
         cam1_dnn_address = ("localhost", CAMERA1_DNN_PORT)
@@ -355,7 +429,7 @@ def main():
         cam2_info_thread.start()
         cam2_dnn_thread.start()
         
-    # open camera1 shared_memory
+    # Open camera1 shared_memory
     if cam_in_use == 1 or cam_in_use == 3:
         shm_name = CAMERA1_SHM_BMP_NAME
         cam1_image_shm = open_shared_memory(shm_name)
@@ -447,25 +521,21 @@ def main():
                 response = json.dumps({"Cam1ErrCode": cam1_error_code,"Cam2ErrCode": cam2_error_code})
                 uart.send_serial(response)
             elif string[:6] == "REACT|":
-                if string[6:] and int(string[6:]) in range(0, 27):
-                    ener_mode = str(string[6:])
-                    if cam_in_use == 1 or cam_in_use == 3:
-                        camera_control_process('cam1_info_sock', ENERGENCY_MODE, int(string[6:]), logger)
-                    if cam_in_use == 2 or cam_in_use == 3:
-                        camera_control_process('cam2_info_sock', ENERGENCY_MODE, int(string[6:]), logger)
-                response = json.dumps({"EmergencyMode": int(ener_mode)})
+                # Just return current emer_mode, no modification
+                response = json.dumps({"EmergencyMode": int(emer_mode)})
                 uart.send_serial(response)
-                if int(ener_mode) in range(0, 27):
-                    pass
-                    ener_mode = "0"
             elif string == "?OBdata":
-                # save image to str_image,wait str
-                if cam_in_use == 1 or cam_in_use == 3:
-                    get_pic_from_socket(cam1_image_shm_ptr, CAM1_ID)
-                if cam_in_use == 2 or cam_in_use == 3:
-                    get_pic_from_socket(cam2_image_shm_ptr, CAM2_ID)
-                update_sim_attribute(cam_in_use)
-
+                # If emer_mode == 1, skip image save and update_sim_attribute
+                if emer_mode == 1:
+                    logger.warning("emer_mode==1, skip image save and update_sim_attribute on ?OBdata")
+                else:
+                    # save image to str_image, wait str
+                    if cam_in_use == 1 or cam_in_use == 3:
+                        get_pic_from_socket(cam1_image_shm_ptr, CAM1_ID)
+                    if cam_in_use == 2 or cam_in_use == 3:
+                        get_pic_from_socket(cam2_image_shm_ptr, CAM2_ID)
+                    update_sim_attribute(cam_in_use, logger)
+                    
                 # get count data
                 if cam_in_use == 1 or cam_in_use == 3:
                     dnn_dict1 = get_dnn_date('cam1_dnn_sock', logger)
@@ -473,10 +543,8 @@ def main():
                     dnn_dict2 = get_dnn_date('cam2_dnn_sock', logger)
                 if cam_in_use == 1 or cam_in_use == 3:
                     if dnn_dict1:
-                        response1 = json.dumps(dnn_dict1)
-                        response1 = json.loads(response1)
-                        for key in response1.keys():
-                            dnn_dirct[key] = response1[key]
+                        for key in dnn_dict1.keys():
+                            dnn_dirct[key] = dnn_dict1[key]
                         dnn_dirct = update_speeds_with_prefix(dnn_dirct)
                         response = json.dumps(dnn_dirct)
                         uart.send_serial(response)
@@ -485,10 +553,8 @@ def main():
                         uart.send_serial(response)
                 if cam_in_use == 2 or cam_in_use == 3:
                     if dnn_dict2:
-                        response2 = json.dumps(dnn_dict2)
-                        response2 = json.loads(response2)
-                        for key in response2.keys():
-                            dnn_dirct[key] = response2[key]
+                        for key in dnn_dict2.keys():
+                            dnn_dirct[key] = dnn_dict2[key]
                         dnn_dirct = update_speeds_with_prefix(dnn_dirct)
                         response = json.dumps(dnn_dirct)
                         uart.send_serial(response)
@@ -511,14 +577,8 @@ def main():
                     exposure = camera_control_process(cam_info_socket, GET_EXPOSURE, 0, logger)
                     ae_model = camera_control_process(cam_info_socket, GET_AE_MODE, 0, logger)
                     awb_model = camera_control_process(cam_info_socket, GET_AWB_MODE, 0, logger)
-                    if ae_model == 0:
-                        ae_status = "auto"
-                    else:
-                        ae_status = "manual"
-                    if awb_model == 0:
-                        awb_status = "enable"
-                    else:
-                        awb_status = "disable"
+                    ae_status = "auto" if ae_model == 0 else "manual"
+                    awb_status = "enable" if awb_model == 0 else "disable"
                     ps_data = {
                         "CameraFPS": config["CameraFPS"],
                         "ImageSize": f"{config['InputTensorWidth']}*{config['InputTensorHeith']}",
@@ -558,11 +618,19 @@ def main():
                     response = json.dumps(post_processing)
                     uart.send_serial(response)
                 elif (index - 5) < len(str_image):
+                    if index == 5 and emer_mode == 1:
+                        emer_imgage_send = 1
                     response = "{\"Block" + str(index - 4) + "\":\"" + str_image[index - 5] + "\"}"
                     uart.send_serial(response)
+                    if index == 24 and emer_imgage_send == 1:
+                        emer_imgage_send = 0
+                        emer_mode = 0
                 elif index < 25:
                     response = "{\"Block" + str(index - 4) + "\":\"" + "\"}"
                     uart.send_serial(response)
+                    if index == 24 and emer_imgage_send == 1:
+                        emer_imgage_send = 0
+                        emer_mode = 0
                 else:
                     logger.error(f"out of Block -> ?PS{index}")
 
