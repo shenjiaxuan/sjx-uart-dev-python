@@ -12,8 +12,8 @@ TEST_RUN_COUNT = 1
 class UART:
     def __init__(self):
         self.uartport = serial.Serial(
-                port="COM4",
-                baudrate=115200,
+                port="COM3",
+                baudrate=38400,
                 bytesize=serial.EIGHTBITS,
                 parity=serial.PARITY_NONE,
                 stopbits=serial.STOPBITS_ONE,
@@ -85,7 +85,6 @@ if __name__ == '__main__':
         "@|600",
         "@|",
         "?Order",
-        "Profile|1",
         "Profile|",
         "WiFi|1",
         "WiFi|",
