@@ -27,6 +27,13 @@ LOG_FOLDER = "log"
 CONFIG_PATH = '/home/root/AglaiaSense/resource/share_config/gs501.json'
 CAM1_ID = 1
 CAM2_ID = 2
+
+# CDS ports
+CDS_SERVER_PORT_LEFT_CMD = 7170
+CDS_SERVER_PORT_LEFT_EVENT = 7171
+CDS_SERVER_PORT_RIGHT_CMD = 7180
+CDS_SERVER_PORT_RIGHT_EVENT = 7181
+
 # define pic size
 IMAGE_CHANNELS = 3
 IMAGE_HEIGHT = 300
@@ -40,17 +47,28 @@ str_image = []
 emer_imgage_send = 0
 
 dnn_default_dirct = {"spdunit":"MPH","incar":-1,"incarspd":-1,"inbus":-1,"inbusspd":-1,"inped":-1,"inpedspd":-1,"incycle":-1,"incyclespd":-1,"intruck":-1,"intruckspd":-1,"outcar":-1,"outcarspd":-1,"outbus":-1,"outbusspd":-1,"outped":-1,"outpedspd":-1,"outcycle":-1,"outcyclespd":-1,"outtruck":-1,"outtruckspd":-1}
+
 sockets = {
     'cam1_info_sock': None,
     'cam2_info_sock': None,
     'cam1_dnn_sock': None,
-    'cam2_dnn_sock': None
+    'cam2_dnn_sock': None,
+    'cds_left_cmd_sock': None,
+    'cds_left_event_sock': None,
+    'cds_right_cmd_sock': None,
+    'cds_right_event_sock': None
 }
+
 
 # Declare globals for shared memory pointers and cam_in_use to be accessible in emer_mode_server
 cam1_image_shm_ptr = None
 cam2_image_shm_ptr = None
 cam_in_use = 1
+
+# CDS related globals
+previous_counting_data_left = {}
+previous_counting_data_right = {}
+cds_alerts_received = False
 
 def setup_logger(log_file_path):
     logger = logging.getLogger("uart_logger")
@@ -82,10 +100,42 @@ def connect_socket(server_address, logger, socket_key):
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.connect(server_address)
             sockets[socket_key] = sock
-            logger.info(f"Connected to server at {server_address}")
+            logger.info(f"Connected to server at {server_address} for {socket_key}")
+            
+            # If this is CDS socket, start listening for events
+            if socket_key in ['cds_left_sock', 'cds_right_sock']:
+                event_thread = threading.Thread(target=listen_for_cds_events, args=(sock, socket_key, logger), daemon=True)
+                event_thread.start()
+                
         except socket.error as e:
-            logger.error(f"Failed to connect to server: {e}. Retrying in 5 seconds...")
+            logger.error(f"Failed to connect to {server_address} for {socket_key}: {e}. Retrying in 5 seconds...")
             time.sleep(5)  # Wait 5 seconds and try again
+
+def listen_for_cds_events(sock, socket_key, logger):
+    """Listen for incoming events from CDS server"""
+    global cds_alerts_received, emer_mode
+    
+    while True:
+        try:
+            data = sock.recv(4096)
+            if not data:
+                break
+                
+            message = json.loads(data.decode('utf-8'))
+            
+            if message.get("type") == "alert":
+                logger.info(f"Received CDS alert from {socket_key}: {message}")
+                cds_alerts_received = True
+                # Set emergency mode when alert received
+                emer_mode = 1
+            elif message.get("type") == "parking":
+                # UART receives parking events but ignores them
+                logger.info(f"Received CDS parking event from {socket_key} (ignored by UART): {message}")
+                
+        except Exception as e:
+            logger.error(f"Error listening for CDS events on {socket_key}: {e}")
+            sockets[socket_key] = None
+            break
 
 def send_data(socket_key, data, logger):
     sock = sockets[socket_key]
@@ -115,6 +165,123 @@ def receive_data(socket_key, buffer_size, logger):
         logger.error(f"Receive error: {e}. Setting {socket_key} to None.")
         sockets[socket_key] = None
         return None
+
+def send_cds_command(socket_key, command, logger):
+    """发送命令到CDS服务器 - 只使用命令socket"""
+    sock = sockets[socket_key]
+    if sock is None:
+        logger.error(f"No CDS command socket connection for {socket_key}")
+        return None
+        
+    try:
+        command_json = json.dumps(command)
+        sock.send(command_json.encode('utf-8'))
+        
+        response = sock.recv(4096)
+        if response:
+            return json.loads(response.decode('utf-8'))
+        return None
+        
+    except Exception as e:
+        logger.error(f"CDS command error for {socket_key}: {e}")
+        sockets[socket_key] = None
+        return None
+
+def get_cds_counting_data(logger):
+    """获取CDS计数数据 - 使用命令socket"""
+    left_counting_data = {}
+    right_counting_data = {}
+    
+    if cam_in_use == 1 or cam_in_use == 3:  # 左摄像头
+        if sockets['cds_left_cmd_sock']:  # 使用命令socket
+            command = {"cmd": "get_counting"}
+            response = send_cds_command('cds_left_cmd_sock', command, logger)
+            if response and response.get("status") == "success":
+                data = response.get("counting_data", {})
+                if "left" in data:
+                    left_counting_data = data["left"]
+    
+    if cam_in_use == 2 or cam_in_use == 3:  # 右摄像头
+        if sockets['cds_right_cmd_sock']:  # 使用命令socket
+            command = {"cmd": "get_counting"}
+            response = send_cds_command('cds_right_cmd_sock', command, logger)
+            if response and response.get("status") == "success":
+                data = response.get("counting_data", {})
+                if "right" in data:
+                    right_counting_data = data["right"]
+    
+    return left_counting_data, right_counting_data
+
+def process_cumulative_counting(current_data, camera_side, logger):
+    """Process cumulative counting data by subtracting previous values"""
+    global previous_counting_data_left, previous_counting_data_right
+    
+    # Select the appropriate previous data dictionary based on camera side
+    if camera_side == "left":
+        previous_counting_data = previous_counting_data_left
+    elif camera_side == "right":
+        previous_counting_data = previous_counting_data_right
+    else:
+        logger.error(f"Invalid camera_side: {camera_side}")
+        return {}
+    
+    period_data = {}
+    
+    for boundary, counts in current_data.items():
+        if boundary not in previous_counting_data:
+            previous_counting_data[boundary] = {}
+            
+        period_data[boundary] = {}
+        
+        for vehicle_type, count in counts.items():
+            prev_count = previous_counting_data[boundary].get(vehicle_type, 0)
+            period_count = max(0, count - prev_count)  # Ensure non-negative
+            period_data[boundary][vehicle_type] = period_count
+            previous_counting_data[boundary][vehicle_type] = count
+    
+    # Update the global dictionary based on camera side
+    if camera_side == "left":
+        previous_counting_data_left = previous_counting_data
+    elif camera_side == "right":
+        previous_counting_data_right = previous_counting_data
+    
+    return period_data
+
+def reformat_counting_for_uart(counting_results, logger):
+    """Reformat counting data for UART based on boundary names (xxx_in, xxx_out)"""
+    uart_data = dnn_default_dirct.copy()
+    
+    try:
+        # Process single camera counting results
+        for boundary, counts in counting_results.items():
+            # Check if boundary name ends with _in or _out
+            if boundary.endswith('_in'):
+                direction = 'in'
+            elif boundary.endswith('_out'):
+                direction = 'out'
+            else:
+                # For boundaries like boundary_1, boundary_2, assume 'in' for now
+                direction = 'in'
+            
+            # Map vehicle types to UART format
+            vehicle_mapping = {
+                'car': 'car',
+                'truck': 'truck', 
+                'bus': 'bus',
+                'pedestrian': 'ped',
+                'cycle': 'cycle'
+            }
+            
+            for vehicle_type, count in counts.items():
+                if vehicle_type in vehicle_mapping:
+                    uart_key = direction + vehicle_mapping[vehicle_type]
+                    if uart_key in uart_data:
+                        uart_data[uart_key] = count  # Single camera data
+                        
+    except Exception as e:
+        logger.error(f"Error reformatting counting data: {e}")
+        
+    return uart_data
 
 def open_shared_memory(shm_name):
     try:
@@ -285,7 +452,15 @@ def update_sim_attribute(cam_in_use, logger):
     str_image = []
     for x in range(send_time):
         str_image.append(converted_string[x * send_max_length:(x + 1) * send_max_length])
+# spd -1
+# def update_speeds_with_prefix(dnn_dict):
+#     # Keep spd as -1 as requested
+#     for key in dnn_dict.keys():
+#         if key.endswith('spd'):
+#             dnn_dict[key] = -1
+#     return dnn_dict
 
+# spd ranges
 def update_speeds_with_prefix(dnn_dict):
     # different types of speed ranges
     speed_ranges = {
@@ -410,7 +585,20 @@ def main():
     emer_mode_thread.daemon = True
     emer_mode_thread.start()
 
+    # Connect to CDS servers
     if cam_in_use == 1 or cam_in_use == 3:
+        # 左摄像头 - 命令端口
+        cds_left_cmd_address = ("localhost", CDS_SERVER_PORT_LEFT_CMD)
+        cds_left_cmd_thread = Thread(target=connect_socket, args=(cds_left_cmd_address, logger, 'cds_left_cmd_sock'))
+        cds_left_cmd_thread.daemon = True
+        cds_left_cmd_thread.start()
+        
+        # 左摄像头 - 事件端口
+        cds_left_event_address = ("localhost", CDS_SERVER_PORT_LEFT_EVENT)
+        cds_left_event_thread = Thread(target=connect_socket, args=(cds_left_event_address, logger, 'cds_left_event_sock'))
+        cds_left_event_thread.daemon = True
+        cds_left_event_thread.start()
+        # Original camera connections
         cam1_info_address = ("localhost", CAMERA1_PORT)
         cam1_dnn_address = ("localhost", CAMERA1_DNN_PORT)
         cam1_info_thread = Thread(target=connect_socket, args=(cam1_info_address, logger, 'cam1_info_sock'))
@@ -419,7 +607,20 @@ def main():
         cam1_dnn_thread.daemon = True
         cam1_info_thread.start()
         cam1_dnn_thread.start()
+        
     if cam_in_use == 2 or cam_in_use == 3:
+        # 右摄像头 - 命令端口
+        cds_right_cmd_address = ("localhost", CDS_SERVER_PORT_RIGHT_CMD)
+        cds_right_cmd_thread = Thread(target=connect_socket, args=(cds_right_cmd_address, logger, 'cds_right_cmd_sock'))
+        cds_right_cmd_thread.daemon = True
+        cds_right_cmd_thread.start()
+        
+        # 右摄像头 - 事件端口
+        cds_right_event_address = ("localhost", CDS_SERVER_PORT_RIGHT_EVENT)
+        cds_right_event_thread = Thread(target=connect_socket, args=(cds_right_event_address, logger, 'cds_right_event_sock'))
+        cds_right_event_thread.daemon = True
+        cds_right_event_thread.start()
+        # Original camera connections
         cam2_info_address = ("localhost", CAMERA2_PORT)
         cam2_dnn_address = ("localhost", CAMERA2_DNN_PORT)
         cam2_info_thread = Thread(target=connect_socket, args=(cam2_info_address, logger, 'cam2_info_sock'))
@@ -536,31 +737,37 @@ def main():
                         get_pic_from_socket(cam2_image_shm_ptr, CAM2_ID)
                     update_sim_attribute(cam_in_use, logger)
                     
-                # get count data
+                # Get counting data from CDS - returns separate left and right data
+                left_counting_data, right_counting_data = get_cds_counting_data(logger)
+                
+                # Process left camera data (cam1)
                 if cam_in_use == 1 or cam_in_use == 3:
-                    dnn_dict1 = get_dnn_date('cam1_dnn_sock', logger)
-                if cam_in_use == 2 or cam_in_use == 3:
-                    dnn_dict2 = get_dnn_date('cam2_dnn_sock', logger)
-                if cam_in_use == 1 or cam_in_use == 3:
-                    if dnn_dict1:
-                        for key in dnn_dict1.keys():
-                            dnn_dirct[key] = dnn_dict1[key]
-                        dnn_dirct = update_speeds_with_prefix(dnn_dirct)
-                        response = json.dumps(dnn_dirct)
+                    if left_counting_data:
+                        # Process cumulative data to get period counts for left camera
+                        left_period_data = process_cumulative_counting(left_counting_data, "left", logger)
+                        # Reformat for UART
+                        uart_data = reformat_counting_for_uart(left_period_data, logger)
+                        uart_data = update_speeds_with_prefix(uart_data)
+                        response = json.dumps(uart_data)
                         uart.send_serial(response)
                     else:
                         response = json.dumps(dnn_default_dirct)
                         uart.send_serial(response)
+                
+                # Process right camera data (cam2)
                 if cam_in_use == 2 or cam_in_use == 3:
-                    if dnn_dict2:
-                        for key in dnn_dict2.keys():
-                            dnn_dirct[key] = dnn_dict2[key]
-                        dnn_dirct = update_speeds_with_prefix(dnn_dirct)
-                        response = json.dumps(dnn_dirct)
+                    if right_counting_data:
+                        # Process cumulative data to get period counts for right camera
+                        right_period_data = process_cumulative_counting(right_counting_data, "right", logger)
+                        # Reformat for UART
+                        uart_data = reformat_counting_for_uart(right_period_data, logger)
+                        uart_data = update_speeds_with_prefix(uart_data)
+                        response = json.dumps(uart_data)
                         uart.send_serial(response)
                     else:
                         response = json.dumps(dnn_default_dirct)
                         uart.send_serial(response)
+
             elif string[:3] == "?PS":
                 index = int(string[3:])
                 if index in [1, 2]:

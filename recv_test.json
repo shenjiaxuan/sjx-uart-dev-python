@@ -3,7 +3,7 @@
         {
             "MfrName": "Leopard",
             "ModelNumber": "IMX501_EV1",
-            "SerialNumber": "1A325G32",
+            "SerialNumber": "GS500-S0-2-2511-TES3",
             "MfgDate": "20240103",
             "FWVersion": "1.0.0",
             "HWVersion": "1.0.2",
@@ -26,12 +26,7 @@
             "ImageAttr": "624,625,626,627,628,629,630,631,632,633,634,635,636,637,638,639,640,641,642,643",
             "Cam1SetAttr": "620",
             "Cam2SetAttr": "621",
-            "AIProessAttr": "622,623"
-        }
-    ],
-    "Profile|1": [
-        {
-            "CamProfile": 1
+            "AIProcessAttr": "622,623"
         }
     ],
     "Profile|": [
@@ -39,14 +34,14 @@
             "CamProfile": 1
         }
     ],
-    "WiFi|0": [
+    "WiFi|1": [
         {
-            "WiFiEnable": 0
+            "WiFiEnable": 1
         }
     ],
     "WiFi|": [
         {
-            "WiFiEnable": 0
+            "WiFiEnable": 1
         }
     ],
     "?ERR": [
@@ -57,7 +52,7 @@
     ],
     "REACT|1": [
         {
-            "EmergencyMode": 1
+            "EmergencyMode": 0
         }
     ],
     "REACT|": [
@@ -67,82 +62,87 @@
     ],
     "?OBdata": [
         {
-            "cmd": 0,
-            "name": "",
-            "x_start": 0,
-            "y_start": 0,
-            "x_end": 0,
-            "y_end": 0
-        },
-        {
-            "cmd": 0,
-            "name": "",
-            "x_start": 0,
-            "y_start": 0,
-            "x_end": 0,
-            "y_end": 0
+            "spdunit": "MPH",
+            "incar": 41,
+            "incarspd": 22,
+            "inbus": -1,
+            "inbusspd": 0,
+            "inped": -1,
+            "inpedspd": 0,
+            "incycle": -1,
+            "incyclespd": 0,
+            "intruck": -1,
+            "intruckspd": 0,
+            "outcar": 87,
+            "outcarspd": 63,
+            "outbus": 0,
+            "outbusspd": 0,
+            "outped": 0,
+            "outpedspd": 0,
+            "outcycle": -1,
+            "outcyclespd": 0,
+            "outtruck": -1,
+            "outtruckspd": 0
         }
     ],
     "?PS1": [
         {
             "CameraFPS": "30",
-            "ImageSize": "300*300",
+            "ImageSize": "416*416",
             "PixelDepth": "RAW10",
             "PixelOrder": "RGGB",
-            "DNNModel": "TrafficCount20231102",
-            "PostProcessingLogic": "8:00-PostProcessing1,19:00-PostProcessing2",
+            "DNNModel": "CUSTOM",
+            "PostProcessingLogic": "All-PostProcessing",
             "SendImageQuality": "50",
             "SendImageSizePercent": "100",
             "AEModel": "auto",
-            "Exposure": 33,
-            "Gain": 16,
+            "Exposure": 15,
+            "Gain": 1,
             "AWBMode": "enable",
             "Heating": "enable",
-            "Time": "29/04/2022 00:16:29"
+            "Time": "05/06/2025 07:48:23"
         }
     ],
     "?PS2": [
         {
             "CameraFPS": "30",
-            "ImageSize": "300*300",
+            "ImageSize": "416*416",
             "PixelDepth": "RAW10",
             "PixelOrder": "RGGB",
-            "DNNModel": "TrafficCount20231102",
-            "PostProcessingLogic": "8:00-PostProcessing1,19:00-PostProcessing2",
+            "DNNModel": "CUSTOM",
+            "PostProcessingLogic": "All-PostProcessing",
             "SendImageQuality": "50",
             "SendImageSizePercent": "100",
             "AEModel": "auto",
-            "Exposure": 33,
-            "Gain": 16,
+            "Exposure": 15,
+            "Gain": 1,
             "AWBMode": "enable",
             "Heating": "enable",
-            "Time": "29/04/2022 00:16:30"
+            "Time": "05/06/2025 07:48:23"
         }
     ],
     "?PS3": [
         {
-            "x1": "120",
-            "y1": "110",
-            "x2": "185",
-            "y2": "120",
-            "x3": "171",
-            "y3": "142",
-            "x4": "137",
-            "y4": "188",
-            "x5": "99",
-            "y5": "154"
+            "x1": "138",
+            "y1": "161",
+            "x2": "20",
+            "y2": "140",
+            "x3": "144",
+            "y3": "151",
+            "x4": "290",
+            "y4": "142"
         }
     ],
     "?PS4": [
         {
-            "x1": "180",
-            "y1": "92",
-            "x2": "197",
-            "y2": "145",
-            "x3": "190",
-            "y3": "229",
-            "x4": "160",
-            "y4": "197"
+            "x1": "138",
+            "y1": "161",
+            "x2": "20",
+            "y2": "140",
+            "x3": "144",
+            "y3": "151",
+            "x4": "290",
+            "y4": "142"
         }
     ],
     "?PS5": [
@@ -151,6 +151,96 @@
         }
     ],
     "?PS6": [
+        {
+            "image_data_received": true
+        }
+    ],
+    "?PS7": [
+        {
+            "image_data_received": true
+        }
+    ],
+    "?PS8": [
+        {
+            "image_data_received": true
+        }
+    ],
+    "?PS9": [
+        {
+            "image_data_received": true
+        }
+    ],
+    "?PS10": [
+        {
+            "image_data_received": true
+        }
+    ],
+    "?PS11": [
+        {
+            "image_data_received": true
+        }
+    ],
+    "?PS12": [
+        {
+            "image_data_received": true
+        }
+    ],
+    "?PS13": [
+        {
+            "image_data_received": true
+        }
+    ],
+    "?PS14": [
+        {
+            "image_data_received": true
+        }
+    ],
+    "?PS15": [
+        {
+            "image_data_received": true
+        }
+    ],
+    "?PS16": [
+        {
+            "image_data_received": true
+        }
+    ],
+    "?PS17": [
+        {
+            "image_data_received": true
+        }
+    ],
+    "?PS18": [
+        {
+            "image_data_received": true
+        }
+    ],
+    "?PS19": [
+        {
+            "image_data_received": true
+        }
+    ],
+    "?PS20": [
+        {
+            "image_data_received": true
+        }
+    ],
+    "?PS21": [
+        {
+            "image_data_received": true
+        }
+    ],
+    "?PS22": [
+        {
+            "image_data_received": true
+        }
+    ],
+    "?PS23": [
+        {
+            "image_data_received": true
+        }
+    ],
+    "?PS24": [
         {
             "image_data_received": true
         }
