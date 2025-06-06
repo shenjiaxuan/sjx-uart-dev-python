@@ -103,7 +103,7 @@ def connect_socket(server_address, logger, socket_key):
             logger.info(f"Connected to server at {server_address} for {socket_key}")
             
             # If this is CDS socket, start listening for events
-            if socket_key in ['cds_left_sock', 'cds_right_sock']:
+            if socket_key in ['cds_left_event_sock', 'cds_right_event_sock']:
                 event_thread = threading.Thread(target=listen_for_cds_events, args=(sock, socket_key, logger), daemon=True)
                 event_thread.start()
                 
@@ -114,7 +114,7 @@ def connect_socket(server_address, logger, socket_key):
 def listen_for_cds_events(sock, socket_key, logger):
     """Listen for incoming events from CDS server"""
     global cds_alerts_received, emer_mode
-    
+    print(f"[sjx debug]Listening for CDS events on {socket_key}")
     while True:
         try:
             data = sock.recv(4096)
@@ -122,7 +122,7 @@ def listen_for_cds_events(sock, socket_key, logger):
                 break
                 
             message = json.loads(data.decode('utf-8'))
-            
+            print(f"[sjx debug]Received message from {socket_key}: {message}")
             if message.get("type") == "alert":
                 logger.info(f"Received CDS alert from {socket_key}: {message}")
                 cds_alerts_received = True
