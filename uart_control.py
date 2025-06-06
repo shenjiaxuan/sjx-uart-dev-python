@@ -59,8 +59,6 @@ sockets = {
     'cds_right_event_sock': None
 }
 
-
-# Declare globals for shared memory pointers and cam_in_use to be accessible in emer_mode_server
 cam1_image_shm_ptr = None
 cam2_image_shm_ptr = None
 cam_in_use = 1
@@ -113,8 +111,7 @@ def connect_socket(server_address, logger, socket_key):
 
 def listen_for_cds_events(sock, socket_key, logger):
     """Listen for incoming events from CDS server"""
-    global cds_alerts_received, emer_mode
-    print(f"[sjx debug]Listening for CDS events on {socket_key}")
+    global cds_alerts_received, emer_mode, cam1_image_shm_ptr, cam2_image_shm_ptr, cam_in_use
     while True:
         try:
             data = sock.recv(4096)
@@ -122,12 +119,20 @@ def listen_for_cds_events(sock, socket_key, logger):
                 break
                 
             message = json.loads(data.decode('utf-8'))
-            print(f"[sjx debug]Received message from {socket_key}: {message}")
             if message.get("type") == "alert":
                 logger.info(f"Received CDS alert from {socket_key}: {message}")
                 cds_alerts_received = True
                 # Set emergency mode when alert received
                 emer_mode = 1
+                logger.info(f"emer_mode set to {emer_mode} by CDS alert")
+                
+                # Save images to buffer when emer_mode is set to 1
+                if cam_in_use == 1 or cam_in_use == 3:
+                    get_pic_from_socket(cam1_image_shm_ptr, CAM1_ID)
+                if cam_in_use == 2 or cam_in_use == 3:
+                    get_pic_from_socket(cam2_image_shm_ptr, CAM2_ID)
+                update_sim_attribute(cam_in_use, logger)
+                
             elif message.get("type") == "parking":
                 # UART receives parking events but ignores them
                 logger.info(f"Received CDS parking event from {socket_key} (ignored by UART): {message}")
@@ -452,13 +457,6 @@ def update_sim_attribute(cam_in_use, logger):
     str_image = []
     for x in range(send_time):
         str_image.append(converted_string[x * send_max_length:(x + 1) * send_max_length])
-# spd -1
-# def update_speeds_with_prefix(dnn_dict):
-#     # Keep spd as -1 as requested
-#     for key in dnn_dict.keys():
-#         if key.endswith('spd'):
-#             dnn_dict[key] = -1
-#     return dnn_dict
 
 # spd ranges
 def update_speeds_with_prefix(dnn_dict):
@@ -493,63 +491,10 @@ def update_speeds_with_prefix(dnn_dict):
                 dnn_dict[speed_key] = 0
     return dnn_dict
 
-def handle_emer_mode_client(client_sock, addr, logger):
-    """
-    Handle communication with one EmergenMode client.
-    Keep receiving until client disconnects.
-    """
-    global emer_mode, cam_in_use, cam1_image_shm_ptr, cam2_image_shm_ptr
-    logger.info(f"Handling EmergenMode client from {addr}")
-    try:
-        while True:
-            data = client_sock.recv(1024)
-            if not data:
-                logger.info(f"Client {addr} disconnected")
-                break  # client closed connection
-
-            try:
-                msg = json.loads(data.decode('utf-8'))
-                if 'EmergMode' in msg:
-                    emer_mode = int(msg['EmergMode'])
-                    logger.info(f"emer_mode set to {emer_mode} by socket message")
-                    if emer_mode == 1:
-                        # Save images to buffer when emer_mode is set to 1
-                        if cam_in_use == 1 or cam_in_use == 3:
-                            get_pic_from_socket(cam1_image_shm_ptr, CAM1_ID)
-                        if cam_in_use == 2 or cam_in_use == 3:
-                            get_pic_from_socket(cam2_image_shm_ptr, CAM2_ID)
-                        update_sim_attribute(cam_in_use, logger)
-            except Exception as e:
-                logger.error(f"Failed to parse EmergenMode json: {e}")
-    except Exception as e:
-        logger.error(f"Error handling EmergenMode client: {e}")
-    finally:
-        client_sock.close()
-        logger.info(f"EmergenMode client from {addr} connection closed")
-
-
-def emer_mode_server(host, port, logger):
-    """
-    Multi-threaded Socket server to listen for {"EmergMode": 1} JSON messages.
-    Each client connection handled in a separate thread.
-    """
-    server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server_sock.bind((host, port))
-    server_sock.listen(5)  # backlog 5
-    logger.info(f"EmergMode server listening on {host}:{port}")
-
-    while True:
-        client_sock, addr = server_sock.accept()
-        logger.info(f"EmergMode client connected from {addr}")
-        client_thread = threading.Thread(target=handle_emer_mode_client, args=(client_sock, addr, logger))
-        client_thread.daemon = True
-        client_thread.start()
-
 def main():
     """
     Main function to initialize logger, UART, load config, start socket connection
-    and emer_mode server thread, and handle UART commands.
+    and handle UART commands.
     """
     global count_interval, profile_index, emer_mode
     global IMAGE_HEIGHT, IMAGE_WIDTH, cam_in_use
@@ -579,11 +524,6 @@ def main():
     else:
         logger.error(f"Invalid SensorNum value: {sensor_num}")
         cam_in_use = 1
-
-    # Start emer_mode socket server thread
-    emer_mode_thread = threading.Thread(target=emer_mode_server, args=('127.0.0.1', 5555, logger))
-    emer_mode_thread.daemon = True
-    emer_mode_thread.start()
 
     # Connect to CDS servers
     if cam_in_use == 1 or cam_in_use == 3:
