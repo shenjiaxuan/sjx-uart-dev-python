@@ -31,8 +31,10 @@ CAM2_ID = 2
 # CDS ports
 CDS_SERVER_PORT_LEFT_CMD = 7170
 CDS_SERVER_PORT_LEFT_EVENT = 7171
+CDS_SERVER_PORT_LEFT_SPEED = 7172
 CDS_SERVER_PORT_RIGHT_CMD = 7180
 CDS_SERVER_PORT_RIGHT_EVENT = 7181
+CDS_SERVER_PORT_RIGHT_SPEED = 7182
 
 # define pic size
 IMAGE_CHANNELS = 3
@@ -50,7 +52,7 @@ emer_mode = 0  # corrected from ener_mode
 str_image = []
 emer_imgage_send = 0
 
-dnn_default_dirct = {"spdunit":"MPH","incar":-1,"incarspd":-1,"inbus":-1,"inbusspd":-1,"inped":-1,"inpedspd":-1,"incycle":-1,"incyclespd":-1,"intruck":-1,"intruckspd":-1,"outcar":-1,"outcarspd":-1,"outbus":-1,"outbusspd":-1,"outped":-1,"outpedspd":-1,"outcycle":-1,"outcyclespd":-1,"outtruck":-1,"outtruckspd":-1}
+dnn_default_dirct = {"spdunit":"KPH","incar":-1,"incarspd":-1,"inbus":-1,"inbusspd":-1,"inped":-1,"inpedspd":-1,"incycle":-1,"incyclespd":-1,"intruck":-1,"intruckspd":-1,"outcar":-1,"outcarspd":-1,"outbus":-1,"outbusspd":-1,"outped":-1,"outpedspd":-1,"outcycle":-1,"outcyclespd":-1,"outtruck":-1,"outtruckspd":-1}
 
 sockets = {
     'cam1_info_sock': None,
@@ -59,8 +61,10 @@ sockets = {
     'cam2_dnn_sock': None,
     'cds_left_cmd_sock': None,
     'cds_left_event_sock': None,
+    'cds_left_speed_sock': None,
     'cds_right_cmd_sock': None,
-    'cds_right_event_sock': None
+    'cds_right_event_sock': None,
+    'cds_right_speed_sock': None
 }
 
 
@@ -73,6 +77,13 @@ cam_in_use = 1
 previous_counting_data_left = {}
 previous_counting_data_right = {}
 cds_alerts_received = False
+
+# Speed data globals
+speed_data_left = {}  # {direction_class: [speed_values]}
+speed_data_right = {}
+speed_averages_left = {}  # {direction_class: average_speed}
+speed_averages_right = {}
+speed_data_lock = threading.Lock()
 
 def setup_logger(log_file_path):
     logger = logging.getLogger("uart_logger")
@@ -106,10 +117,13 @@ def connect_socket(server_address, logger, socket_key):
             sockets[socket_key] = sock
             logger.info(f"Connected to server at {server_address} for {socket_key}")
             
-            # If this is CDS socket, start listening for events
+            # If this is CDS socket, start listening for events/speeds
             if socket_key in ['cds_left_event_sock', 'cds_right_event_sock']:
                 event_thread = threading.Thread(target=listen_for_cds_events, args=(sock, socket_key, logger), daemon=True)
                 event_thread.start()
+            elif socket_key in ['cds_left_speed_sock', 'cds_right_speed_sock']:
+                speed_thread = threading.Thread(target=listen_for_cds_speeds, args=(sock, socket_key, logger), daemon=True)
+                speed_thread.start()
                 
         except socket.error as e:
             logger.error(f"Failed to connect to {server_address} for {socket_key}: {e}. Retrying in 5 seconds...")
@@ -147,6 +161,140 @@ def listen_for_cds_events(sock, socket_key, logger):
             logger.error(f"Error listening for CDS events on {socket_key}: {e}")
             sockets[socket_key] = None
             break
+
+def listen_for_cds_speeds(sock, socket_key, logger):
+    """Listen for incoming speed data from CDS server"""
+    global speed_data_left, speed_data_right, speed_averages_left, speed_averages_right
+    
+    while True:
+        try:
+            data = sock.recv(4096)
+            if not data:
+                break
+                
+            message = json.loads(data.decode('utf-8'))
+            if message.get("type") == "speed":
+                camera_side = message.get("camera")
+                speed_event = message.get("data", {})
+                
+                logger.info(f"Received speed data from {socket_key}: {speed_event}")
+                
+                # Process speed event
+                process_speed_data(speed_event, camera_side, logger)
+                
+        except Exception as e:
+            logger.error(f"Error listening for CDS speeds on {socket_key}: {e}")
+            sockets[socket_key] = None
+            break
+
+def process_speed_data(speed_event, camera_side, logger):
+    """Process speed event data and update speed averages"""
+    global speed_data_left, speed_data_right, speed_averages_left, speed_averages_right
+    
+    try:
+        if not speed_event or "event" not in speed_event:
+            return
+            
+        event_data = speed_event["event"]
+        if "shapes" not in event_data:
+            return
+            
+        with speed_data_lock:
+            # Select the appropriate speed data dictionary
+            if camera_side == "left":
+                speed_data = speed_data_left
+                speed_averages = speed_averages_left
+            elif camera_side == "right":
+                speed_data = speed_data_right
+                speed_averages = speed_averages_right
+            else:
+                logger.error(f"Invalid camera_side: {camera_side}")
+                return
+            
+            # Process each shape
+            for shape in event_data["shapes"]:
+                label = shape.get("label", "")
+                counters = shape.get("counters", [])
+                
+                # Determine direction from label
+                direction = "in"  # default
+                if label.endswith("_out"):
+                    direction = "out"
+                elif label.endswith("_in"):
+                    direction = "in"
+                elif "_" in label:
+                    # For labels like "lane_0", assume "in" for now
+                    direction = "in"
+                
+                # Process each counter
+                for counter in counters:
+                    vehicle_class = counter.get("class", "")
+                    speed = counter.get("speed", 0.0)
+                    
+                    if vehicle_class and speed > 0:
+                        # Map vehicle class names
+                        vehicle_mapping = {
+                            'car': 'car',
+                            'truck': 'truck',
+                            'bus': 'bus',
+                            'pedestrian': 'ped',
+                            'cycle': 'cycle'
+                        }
+                        
+                        mapped_class = vehicle_mapping.get(vehicle_class, vehicle_class)
+                        direction_class = f"{direction}{mapped_class}"
+                        
+                        # Add speed to data list
+                        if direction_class not in speed_data:
+                            speed_data[direction_class] = []
+                        
+                        speed_data[direction_class].append(speed)
+                        
+                        # Calculate running average
+                        speed_list = speed_data[direction_class]
+                        if len(speed_list) == 1:
+                            # First value
+                            speed_averages[direction_class] = speed
+                        else:
+                            # Calculate moving average
+                            current_avg = speed_averages.get(direction_class, speed)
+                            new_avg = (current_avg + speed) / 2.0
+                            speed_averages[direction_class] = new_avg
+                        
+                        logger.info(f"{camera_side} camera: Updated speed for {direction_class}: {speed} (avg: {speed_averages[direction_class]:.2f})")
+            
+            # Update global speed data
+            if camera_side == "left":
+                speed_data_left = speed_data
+                speed_averages_left = speed_averages
+            elif camera_side == "right":
+                speed_data_right = speed_data
+                speed_averages_right = speed_averages
+                
+    except Exception as e:
+        logger.error(f"Error processing speed data: {e}")
+
+def reset_speed_data():
+    """Reset speed data and averages for new cycle"""
+    global speed_data_left, speed_data_right, speed_averages_left, speed_averages_right
+    
+    with speed_data_lock:
+        speed_data_left.clear()
+        speed_data_right.clear()
+        speed_averages_left.clear()
+        speed_averages_right.clear()
+
+def get_speed_data_for_uart(camera_side):
+    """Get speed averages for UART response"""
+    global speed_averages_left, speed_averages_right
+    
+    with speed_data_lock:
+        if camera_side == "left":
+            return dict(speed_averages_left)
+        elif camera_side == "right":
+            return dict(speed_averages_right)
+        else:
+            return {}
 
 def send_data(socket_key, data, logger):
     sock = sockets[socket_key]
@@ -258,8 +406,8 @@ def process_cumulative_counting(current_data, camera_side, logger):
     
     return period_data
 
-def reformat_counting_for_uart(counting_results, logger):
-    """Reformat counting data for UART based on boundary names (xxx_in, xxx_out)"""
+def reformat_counting_for_uart(counting_results, speed_averages, logger):
+    """Reformat counting data for UART and integrate speed averages"""
     uart_data = dnn_default_dirct.copy()
     
     try:
@@ -286,8 +434,17 @@ def reformat_counting_for_uart(counting_results, logger):
             for vehicle_type, count in counts.items():
                 if vehicle_type in vehicle_mapping:
                     uart_key = direction + vehicle_mapping[vehicle_type]
+                    speed_key = uart_key + "spd"
+                    
                     if uart_key in uart_data:
                         uart_data[uart_key] = count  # Single camera data
+                        
+                        # Set speed from averages or -1 if no data/count is 0
+                        direction_class = direction + vehicle_mapping[vehicle_type]
+                        if count > 0 and direction_class in speed_averages:
+                            uart_data[speed_key] = int(round(speed_averages[direction_class]))
+                        else:
+                            uart_data[speed_key] = -1
                         
     except Exception as e:
         logger.error(f"Error reformatting counting data: {e}")
@@ -464,39 +621,6 @@ def update_sim_attribute(cam_in_use, logger):
     for x in range(send_time):
         str_image.append(converted_string[x * send_max_length:(x + 1) * send_max_length])
 
-# spd ranges
-def update_speeds_with_prefix(dnn_dict):
-    # different types of speed ranges
-    speed_ranges = {
-        "car": (20, 70),
-        "bus": (30, 60),
-        "cycle": (5, 20),
-        "truck": (40, 80),
-        "ped": (2, 10)
-    }
-    prefixes = ['in', 'out']
-
-    for key in dnn_dict.keys():
-        # find the count field: no spd suffix, and starts with in or out
-        if key.startswith(tuple(prefixes)) and not key.endswith('spd'):
-            count = dnn_dict.get(key, -1)
-            # get the vehicle type by removing the prefix
-            vehicle_type = None
-            for prefix in prefixes:
-                if key.startswith(prefix):
-                    vehicle_type = key[len(prefix):]
-                    break
-            if vehicle_type not in speed_ranges:
-                continue
-
-            speed_key = key + "spd"
-            if count > 0:
-                low, high = speed_ranges[vehicle_type]
-                dnn_dict[speed_key] = random.randint(low, high)
-            else:
-                dnn_dict[speed_key] = 0
-    return dnn_dict
-
 def main():
     """
     Main function to initialize logger, UART, load config, start socket connection
@@ -544,6 +668,13 @@ def main():
         cds_left_event_thread = Thread(target=connect_socket, args=(cds_left_event_address, logger, 'cds_left_event_sock'))
         cds_left_event_thread.daemon = True
         cds_left_event_thread.start()
+        
+        # 左摄像头 - 速度端口
+        cds_left_speed_address = ("localhost", CDS_SERVER_PORT_LEFT_SPEED)
+        cds_left_speed_thread = Thread(target=connect_socket, args=(cds_left_speed_address, logger, 'cds_left_speed_sock'))
+        cds_left_speed_thread.daemon = True
+        cds_left_speed_thread.start()
+        
         # Original camera connections
         cam1_info_address = ("localhost", CAMERA1_PORT)
         cam1_dnn_address = ("localhost", CAMERA1_DNN_PORT)
@@ -566,6 +697,13 @@ def main():
         cds_right_event_thread = Thread(target=connect_socket, args=(cds_right_event_address, logger, 'cds_right_event_sock'))
         cds_right_event_thread.daemon = True
         cds_right_event_thread.start()
+        
+        # 右摄像头 - 速度端口
+        cds_right_speed_address = ("localhost", CDS_SERVER_PORT_RIGHT_SPEED)
+        cds_right_speed_thread = Thread(target=connect_socket, args=(cds_right_speed_address, logger, 'cds_right_speed_sock'))
+        cds_right_speed_thread.daemon = True
+        cds_right_speed_thread.start()
+        
         # Original camera connections
         cam2_info_address = ("localhost", CAMERA2_PORT)
         cam2_dnn_address = ("localhost", CAMERA2_DNN_PORT)
@@ -694,9 +832,10 @@ def main():
                     if left_counting_data:
                         # Process cumulative data to get period counts for left camera
                         left_period_data = process_cumulative_counting(left_counting_data, "left", logger)
-                        # Reformat for UART
-                        uart_data = reformat_counting_for_uart(left_period_data, logger)
-                        uart_data = update_speeds_with_prefix(uart_data)
+                        # Get speed averages for left camera
+                        left_speed_averages = get_speed_data_for_uart("left")
+                        # Reformat for UART with speed integration
+                        uart_data = reformat_counting_for_uart(left_period_data, left_speed_averages, logger)
                         response = json.dumps(uart_data)
                         uart.send_serial(response)
                     else:
@@ -708,14 +847,18 @@ def main():
                     if right_counting_data:
                         # Process cumulative data to get period counts for right camera
                         right_period_data = process_cumulative_counting(right_counting_data, "right", logger)
-                        # Reformat for UART
-                        uart_data = reformat_counting_for_uart(right_period_data, logger)
-                        uart_data = update_speeds_with_prefix(uart_data)
+                        # Get speed averages for right camera
+                        right_speed_averages = get_speed_data_for_uart("right")
+                        # Reformat for UART with speed integration
+                        uart_data = reformat_counting_for_uart(right_period_data, right_speed_averages, logger)
                         response = json.dumps(uart_data)
                         uart.send_serial(response)
                     else:
                         response = json.dumps(dnn_default_dirct)
                         uart.send_serial(response)
+                
+                # Reset speed data for next cycle
+                reset_speed_data()
 
             elif string[:3] == "?PS":
                 index = int(string[3:])
