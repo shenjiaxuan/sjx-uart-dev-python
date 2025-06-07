@@ -21,6 +21,15 @@ import logging
 from logging.handlers import RotatingFileHandler
 import sys
 
+# ================================
+# SPEED CALCULATION CONFIGURATION
+# ================================
+# Choose speed calculation method:
+# True:  Weighted Average - (previous_average * count + new_speed) / (count + 1)
+# False: Sliding Average  - (current_average + new_speed) / 2
+USE_WEIGHTED_AVERAGE = True
+# ================================
+
 CAMERA1_DIAGNOSE_INFO_PATH = "/home/root/AglaiaSense/resource/share_config/diagnose_info_1.json"
 CAMERA2_DIAGNOSE_INFO_PATH = "/home/root/AglaiaSense/resource/share_config/diagnose_info_2.json"
 LOG_FOLDER = "log"
@@ -83,6 +92,8 @@ speed_data_left = {}  # {direction_class: [speed_values]}
 speed_data_right = {}
 speed_averages_left = {}  # {direction_class: average_speed}
 speed_averages_right = {}
+speed_counts_left = {}  # {direction_class: count}
+speed_counts_right = {}
 speed_data_lock = threading.Lock()
 
 def setup_logger(log_file_path):
@@ -187,9 +198,55 @@ def listen_for_cds_speeds(sock, socket_key, logger):
             sockets[socket_key] = None
             break
 
+def calculate_speed_weighted_average(direction_class, new_speed, speed_averages, speed_counts):
+    """
+    Calculate speed using weighted average method:
+    (previous_average * count + new_speed) / (count + 1)
+    """
+    current_count = speed_counts.get(direction_class, 0)
+    current_avg = speed_averages.get(direction_class, 0.0)
+    
+    if current_count == 0:
+        # First speed value
+        new_avg = new_speed
+        new_count = 1
+    else:
+        # Weighted average calculation
+        new_avg = (current_avg * current_count + new_speed) / (current_count + 1)
+        new_count = current_count + 1
+    
+    speed_averages[direction_class] = new_avg
+    speed_counts[direction_class] = new_count
+    
+    return new_avg
+
+def calculate_speed_sliding_average(direction_class, new_speed, speed_averages, speed_data):
+    """
+    Calculate speed using original sliding average method:
+    (current_average + new_speed) / 2
+    """
+    # Add speed to data list for tracking
+    if direction_class not in speed_data:
+        speed_data[direction_class] = []
+    
+    speed_data[direction_class].append(new_speed)
+    
+    if len(speed_data[direction_class]) == 1:
+        # First value
+        new_avg = new_speed
+    else:
+        # Calculate sliding average
+        current_avg = speed_averages.get(direction_class, new_speed)
+        new_avg = (current_avg + new_speed) / 2.0
+    
+    speed_averages[direction_class] = new_avg
+    
+    return new_avg
+
 def process_speed_data(speed_event, camera_side, logger):
     """Process speed event data and update speed averages"""
     global speed_data_left, speed_data_right, speed_averages_left, speed_averages_right
+    global speed_counts_left, speed_counts_right
     
     try:
         if not speed_event or "event" not in speed_event:
@@ -204,9 +261,11 @@ def process_speed_data(speed_event, camera_side, logger):
             if camera_side == "left":
                 speed_data = speed_data_left
                 speed_averages = speed_averages_left
+                speed_counts = speed_counts_left
             elif camera_side == "right":
                 speed_data = speed_data_right
                 speed_averages = speed_averages_right
+                speed_counts = speed_counts_right
             else:
                 logger.error(f"Invalid camera_side: {camera_side}")
                 return
@@ -244,32 +303,30 @@ def process_speed_data(speed_event, camera_side, logger):
                         mapped_class = vehicle_mapping.get(vehicle_class, vehicle_class)
                         direction_class = f"{direction}{mapped_class}"
                         
-                        # Add speed to data list
-                        if direction_class not in speed_data:
-                            speed_data[direction_class] = []
-                        
-                        speed_data[direction_class].append(speed)
-                        
-                        # Calculate running average
-                        speed_list = speed_data[direction_class]
-                        if len(speed_list) == 1:
-                            # First value
-                            speed_averages[direction_class] = speed
+                        # Calculate speed average using selected method
+                        if USE_WEIGHTED_AVERAGE:
+                            new_avg = calculate_speed_weighted_average(
+                                direction_class, speed, speed_averages, speed_counts
+                            )
+                            count_info = f"count: {speed_counts.get(direction_class, 0)}"
                         else:
-                            # Calculate moving average
-                            current_avg = speed_averages.get(direction_class, speed)
-                            new_avg = (current_avg + speed) / 2.0
-                            speed_averages[direction_class] = new_avg
+                            new_avg = calculate_speed_sliding_average(
+                                direction_class, speed, speed_averages, speed_data
+                            )
+                            count_info = f"samples: {len(speed_data.get(direction_class, []))}"
                         
-                        logger.info(f"{camera_side} camera: Updated speed for {direction_class}: {speed} (avg: {speed_averages[direction_class]:.2f})")
+                        logger.info(f"{camera_side} camera: Updated speed for {direction_class}: {speed} "
+                                  f"(avg: {new_avg:.2f}, {count_info})")
             
             # Update global speed data
             if camera_side == "left":
                 speed_data_left = speed_data
                 speed_averages_left = speed_averages
+                speed_counts_left = speed_counts
             elif camera_side == "right":
                 speed_data_right = speed_data
                 speed_averages_right = speed_averages
+                speed_counts_right = speed_counts
                 
     except Exception as e:
         logger.error(f"Error processing speed data: {e}")
@@ -277,12 +334,15 @@ def process_speed_data(speed_event, camera_side, logger):
 def reset_speed_data():
     """Reset speed data and averages for new cycle"""
     global speed_data_left, speed_data_right, speed_averages_left, speed_averages_right
+    global speed_counts_left, speed_counts_right
     
     with speed_data_lock:
         speed_data_left.clear()
         speed_data_right.clear()
         speed_averages_left.clear()
         speed_averages_right.clear()
+        speed_counts_left.clear()
+        speed_counts_right.clear()
 
 def get_speed_data_for_uart(camera_side):
     """Get speed averages for UART response"""
