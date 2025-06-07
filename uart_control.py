@@ -501,7 +501,7 @@ def reformat_counting_for_uart(counting_results, speed_averages, logger):
                         
                         # Set speed from averages or -1 if no data/count is 0
                         direction_class = direction + vehicle_mapping[vehicle_type]
-                        if count > 0 and direction_class in speed_averages:
+                        if count >= 0 and direction_class in speed_averages:
                             uart_data[speed_key] = int(round(speed_averages[direction_class]))
                         else:
                             uart_data[speed_key] = -1
@@ -652,7 +652,10 @@ def save_image_with_target_size(image, cam_in_use, logger):
         if os.path.getsize(temp_filepath) <= target_size:
             os.rename(temp_filepath, filepath)
             return
-        quality -= 5
+        if quality <= 10:
+            quality -= 2
+        else:
+            quality -= 5
     os.rename(temp_filepath, filepath)
 
 def update_sim_attribute(cam_in_use, logger):
@@ -696,7 +699,6 @@ def main():
     log_file_path = log_folder_path.joinpath("uart_log.txt")
     logger = setup_logger(log_file_path)
     uart = UART(logger)
-    dnn_dirct = dnn_default_dirct.copy()
     config = load_config(CONFIG_PATH)
     IMAGE_HEIGHT = int(config.get('InputTensorHeith'))
     IMAGE_WIDTH = int(config.get('InputTensorWidth'))
