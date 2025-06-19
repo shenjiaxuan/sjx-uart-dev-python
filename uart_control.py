@@ -501,8 +501,10 @@ def reformat_counting_for_uart(counting_results, speed_averages, logger):
                         
                         # Set speed from averages or -1 if no data/count is 0
                         direction_class = direction + vehicle_mapping[vehicle_type]
-                        if count >= 0 and direction_class in speed_averages:
+                        if count > 0 and direction_class in speed_averages:
                             uart_data[speed_key] = int(round(speed_averages[direction_class]))
+                        elif count == 0:
+                            uart_data[speed_key] = 0
                         else:
                             uart_data[speed_key] = -1
                         
