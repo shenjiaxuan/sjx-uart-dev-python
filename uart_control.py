@@ -45,6 +45,15 @@ CDS_SERVER_PORT_RIGHT_CMD = 7171
 CDS_SERVER_PORT_RIGHT_EVENT = 7181
 CDS_SERVER_PORT_RIGHT_SPEED = 7182
 
+# SDK config
+SDK_SERVER_IP = '127.0.0.1'
+SDK_JSON_PORT = 1880
+SDK_BINARY_PORT = 1881
+SDK_USER_NAME = "sdk_user"
+SDK_USER_PASSWD = "sdk_password"
+sdk_token = None
+sdk_token_lock = threading.Lock()
+
 # define pic size
 IMAGE_CHANNELS = 3
 IMAGE_HEIGHT = 300
@@ -147,6 +156,99 @@ def connect_socket(server_address, socket_key):
             logger.error(f"Failed to connect to {server_address} for {socket_key}: {e}. Retrying in 5 seconds...")
             time.sleep(5)  # Wait 5 seconds and try again
 
+# SDK 相关函数
+def send_json_request(request):
+    """向 SDK 发送 JSON 请求"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        try:
+            sock.connect((SDK_SERVER_IP, SDK_JSON_PORT))
+            sock.sendall(json.dumps(request).encode('utf-8'))
+            response = b""
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                response += chunk
+            return json.loads(response.decode('utf-8'))
+        except Exception as e:
+            logger.error(f"SDK JSON request error: {e}")
+            return None
+
+def sdk_login():
+    """SDK 登录获取 token"""
+    global sdk_token
+    request = {"cmd": "user_login_req", "username": SDK_USER_NAME, "passwd": SDK_USER_PASSWD}
+    response = send_json_request(request)
+    if response and response.get("cmd") == "user_login_rsp" and response.get("ret_code") == 0:
+        with sdk_token_lock:
+            sdk_token = response.get("token")
+        logger.info("SDK login successful")
+        return sdk_token
+    else:
+        logger.error(f"SDK login failed: {response}")
+        return None
+
+def sdk_logout():
+    """SDK 登出"""
+    global sdk_token
+    with sdk_token_lock:
+        if sdk_token:
+            request = {"cmd": "user_logout_req", "token": sdk_token}
+            response = send_json_request(request)
+            logger.info(f"SDK logout response: {response}")
+            sdk_token = None
+
+def sdk_get_counting_data(camera_id):
+    """从 SDK 获取计数数据"""
+    global sdk_token
+    
+    with sdk_token_lock:
+        current_token = sdk_token
+    
+    if not current_token:
+        current_token = sdk_login()
+        if not current_token:
+            return None
+    
+    # 根据 camera_id 确定使用的摄像头标识
+    if camera_id == CAM1_ID:
+        camera_name = "left"
+    elif camera_id == CAM2_ID:
+        camera_name = "right"
+    else:
+        logger.error(f"Invalid camera_id for SDK counting: {camera_id}")
+        return None
+    
+    request = {"cmd": "get_dnn_counting_req", "camera_id": camera_name, "token": current_token}
+    response = send_json_request(request)
+    logger.info(f"-----------SDK counting data: {response}")
+    return response
+
+def sdk_heartbeat():
+    """发送心跳保持连接"""
+    global sdk_token
+    
+    with sdk_token_lock:
+        current_token = sdk_token
+    
+    if current_token:
+        request = {"cmd": "heartbeat_req", "token": current_token}
+        response = send_json_request(request)
+        if response and response.get("ret_code") != 0:
+            logger.warning("SDK heartbeat failed, may need to re-login")
+            return False
+        return True
+    return False
+
+def sdk_heartbeat_thread():
+    """心跳线程，定期发送心跳"""
+    while True:
+        try:
+            sdk_heartbeat()
+            time.sleep(60)  # 每60秒发送一次心跳
+        except Exception as e:
+            logger.error(f"SDK heartbeat thread error: {e}")
+            time.sleep(60)
 
 def listen_for_cds_events(sock, socket_key):
     """Listen for incoming events from CDS server"""
@@ -415,27 +517,21 @@ def send_cds_command(socket_key, command):
         return None
 
 def get_cds_counting_data():
-    """获取CDS计数数据 - 使用命令socket"""
+    """从SDK获取计数数据"""
     left_counting_data = {}
     right_counting_data = {}
     
     if cam_in_use == 1 or cam_in_use == 3:  # 左摄像头
-        if sockets['cds_left_cmd_sock']:  # 使用命令socket
-            command = {"cmd": "get_counting"}
-            response = send_cds_command('cds_left_cmd_sock', command)
-            if response and response.get("status") == "success":
-                data = response.get("counting_data", {})
-                if "left" in data:
-                    left_counting_data = data["left"]
+        response = sdk_get_counting_data(CAM1_ID)
+        if response and 'counting_results' in response:
+            counting_results = response.get("counting_results", {})
+            left_counting_data = counting_results
     
     if cam_in_use == 2 or cam_in_use == 3:  # 右摄像头
-        if sockets['cds_right_cmd_sock']:  # 使用命令socket
-            command = {"cmd": "get_counting"}
-            response = send_cds_command('cds_right_cmd_sock', command)
-            if response and response.get("status") == "success":
-                data = response.get("counting_data", {})
-                if "right" in data:
-                    right_counting_data = data["right"]
+        response = sdk_get_counting_data(CAM2_ID)
+        if response and 'counting_results' in response:
+            counting_results = response.get("counting_results", {})
+            right_counting_data = counting_results
     
     return left_counting_data, right_counting_data
 
@@ -722,25 +818,36 @@ def main():
         logger.error(f"Invalid SensorNum value: {sensor_num}")
         cam_in_use = 1
 
+    # Initialize SDK connection
+    logger.info("Initializing SDK connection...")
+    initial_token = sdk_login()
+    if not initial_token:
+        logger.error("Failed to login to SDK, but continuing...")
+    
+    # Start SDK heartbeat thread
+    heartbeat_thread = Thread(target=sdk_heartbeat_thread)
+    heartbeat_thread.daemon = True
+    heartbeat_thread.start()
+
     # Connect to CDS servers
     if cam_in_use == 1 or cam_in_use == 3:
-        # 左摄像头 - 命令端口
-        cds_left_cmd_address = ("localhost", CDS_SERVER_PORT_LEFT_CMD)
-        cds_left_cmd_thread = Thread(target=connect_socket, args=(cds_left_cmd_address, 'cds_left_cmd_sock'))
-        cds_left_cmd_thread.daemon = True
-        cds_left_cmd_thread.start()
+        # # 左摄像头 - 命令端口
+        # cds_left_cmd_address = ("localhost", CDS_SERVER_PORT_LEFT_CMD)
+        # cds_left_cmd_thread = Thread(target=connect_socket, args=(cds_left_cmd_address, 'cds_left_cmd_sock'))
+        # cds_left_cmd_thread.daemon = True
+        # cds_left_cmd_thread.start()
         
-        # 左摄像头 - 事件端口
-        cds_left_event_address = ("localhost", CDS_SERVER_PORT_LEFT_EVENT)
-        cds_left_event_thread = Thread(target=connect_socket, args=(cds_left_event_address, 'cds_left_event_sock'))
-        cds_left_event_thread.daemon = True
-        cds_left_event_thread.start()
+        # # 左摄像头 - 事件端口
+        # cds_left_event_address = ("localhost", CDS_SERVER_PORT_LEFT_EVENT)
+        # cds_left_event_thread = Thread(target=connect_socket, args=(cds_left_event_address, 'cds_left_event_sock'))
+        # cds_left_event_thread.daemon = True
+        # cds_left_event_thread.start()
         
-        # 左摄像头 - 速度端口
-        cds_left_speed_address = ("localhost", CDS_SERVER_PORT_LEFT_SPEED)
-        cds_left_speed_thread = Thread(target=connect_socket, args=(cds_left_speed_address, 'cds_left_speed_sock'))
-        cds_left_speed_thread.daemon = True
-        cds_left_speed_thread.start()
+        # # 左摄像头 - 速度端口
+        # cds_left_speed_address = ("localhost", CDS_SERVER_PORT_LEFT_SPEED)
+        # cds_left_speed_thread = Thread(target=connect_socket, args=(cds_left_speed_address, 'cds_left_speed_sock'))
+        # cds_left_speed_thread.daemon = True
+        # cds_left_speed_thread.start()
         
         # Original camera connections
         cam1_info_address = ("localhost", CAMERA1_PORT)
@@ -753,23 +860,23 @@ def main():
         cam1_dnn_thread.start()
         
     if cam_in_use == 2 or cam_in_use == 3:
-        # 右摄像头 - 命令端口
-        cds_right_cmd_address = ("localhost", CDS_SERVER_PORT_RIGHT_CMD)
-        cds_right_cmd_thread = Thread(target=connect_socket, args=(cds_right_cmd_address, 'cds_right_cmd_sock'))
-        cds_right_cmd_thread.daemon = True
-        cds_right_cmd_thread.start()
+        # # 右摄像头 - 命令端口
+        # cds_right_cmd_address = ("localhost", CDS_SERVER_PORT_RIGHT_CMD)
+        # cds_right_cmd_thread = Thread(target=connect_socket, args=(cds_right_cmd_address, 'cds_right_cmd_sock'))
+        # cds_right_cmd_thread.daemon = True
+        # cds_right_cmd_thread.start()
         
-        # 右摄像头 - 事件端口
-        cds_right_event_address = ("localhost", CDS_SERVER_PORT_RIGHT_EVENT)
-        cds_right_event_thread = Thread(target=connect_socket, args=(cds_right_event_address, 'cds_right_event_sock'))
-        cds_right_event_thread.daemon = True
-        cds_right_event_thread.start()
+        # # 右摄像头 - 事件端口
+        # cds_right_event_address = ("localhost", CDS_SERVER_PORT_RIGHT_EVENT)
+        # cds_right_event_thread = Thread(target=connect_socket, args=(cds_right_event_address, 'cds_right_event_sock'))
+        # cds_right_event_thread.daemon = True
+        # cds_right_event_thread.start()
         
-        # 右摄像头 - 速度端口
-        cds_right_speed_address = ("localhost", CDS_SERVER_PORT_RIGHT_SPEED)
-        cds_right_speed_thread = Thread(target=connect_socket, args=(cds_right_speed_address, 'cds_right_speed_sock'))
-        cds_right_speed_thread.daemon = True
-        cds_right_speed_thread.start()
+        # # 右摄像头 - 速度端口
+        # cds_right_speed_address = ("localhost", CDS_SERVER_PORT_RIGHT_SPEED)
+        # cds_right_speed_thread = Thread(target=connect_socket, args=(cds_right_speed_address, 'cds_right_speed_sock'))
+        # cds_right_speed_thread.daemon = True
+        # cds_right_speed_thread.start()
         
         # Original camera connections
         cam2_info_address = ("localhost", CAMERA2_PORT)
