@@ -826,7 +826,7 @@ def update_sim_attribute(cam_in_use):
 def handle_sdk_client_connection(client_socket, client_address):
     """处理来自SDK的单个客户端连接"""
     logger.info(f"SDK client connected from {client_address}")
-    
+    global cds_alerts_received, emer_mode, cam1_image_shm_ptr, cam2_image_shm_ptr, cam_in_use
     try:
         while True:
             data = client_socket.recv(40960)
@@ -835,7 +835,7 @@ def handle_sdk_client_connection(client_socket, client_address):
                 
             try:
                 message = json.loads(data.decode('utf-8'))
-                logger.info(f"Received data from SDK client {client_address}: {message}")
+                # logger.info(f"Received data from SDK client {client_address}: {message}")
                 event_type = message.get("event_type")
                 camera_id = message.get("camera_id", "unknown")
 
@@ -844,10 +844,21 @@ def handle_sdk_client_connection(client_socket, client_address):
                     speed_event = data_part.get("speed_event", {})
                     process_speed_data(speed_event, camera_id)
                 elif event_type == "pedestrian":
-                    # 预留给行人事件处理
-                    logger.info(f"Received pedestrian event (not processed yet): {message}")
+                    logger.info(f"Received CDS alert from {client_address}: {message}")
+                    cds_alerts_received = True
+                    # Set emergency mode when alert received
+                    emer_mode = 1
+                    logger.info(f"emer_mode set to {emer_mode} by CDS alert")
+                    
+                    # Save images to buffer when emer_mode is set to 1
+                    if cam_in_use == 1 or cam_in_use == 3:
+                        get_pic_from_socket(cam1_image_shm_ptr, CAM1_ID)
+                    if cam_in_use == 2 or cam_in_use == 3:
+                        get_pic_from_socket(cam2_image_shm_ptr, CAM2_ID)
+                    update_sim_attribute(cam_in_use)
+                elif event_type == "parking":
+                    logger.info(f"Received parking event: {message}")
                 else:
-                    # 处理其他类型的事件
                     logger.info(f"Received unknown event type '{event_type}': {message}")
                     
             except json.JSONDecodeError as e:
