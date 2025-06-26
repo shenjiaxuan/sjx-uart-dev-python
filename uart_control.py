@@ -16,10 +16,11 @@ from threading import Thread
 import threading
 from socket_def import *
 import random
+import signal
+import sys
 
 import logging
 from logging.handlers import RotatingFileHandler
-import sys
 
 # ================================
 # SPEED CALCULATION CONFIGURATION
@@ -44,6 +45,12 @@ CDS_SERVER_PORT_LEFT_SPEED = 7173
 CDS_SERVER_PORT_RIGHT_CMD = 7171
 CDS_SERVER_PORT_RIGHT_EVENT = 7181
 CDS_SERVER_PORT_RIGHT_SPEED = 7182
+
+# Event Server Configuration (for receiving speed data from SDK)
+EVENT_SERVER_IP = "127.0.0.1"
+EVENT_SERVER_PORT = 1780  # Port for receiving speed events from SDK
+event_server_socket = None
+event_server_thread = None
 
 # SDK config
 SDK_SERVER_IP = '127.0.0.1'
@@ -249,6 +256,33 @@ def sdk_heartbeat_thread():
         except Exception as e:
             logger.error(f"SDK heartbeat thread error: {e}")
             time.sleep(60)
+
+def sdk_set_event_server_info(server_ip, server_port):
+    """设置事件服务器信息"""
+    global sdk_token
+    
+    with sdk_token_lock:
+        current_token = sdk_token
+    
+    if not current_token:
+        current_token = sdk_login()
+        if not current_token:
+            return False
+    
+    request = {
+        "cmd": "set_event_server_info_req",
+        "token": current_token,
+        "server_ip": server_ip,
+        "server_port": server_port
+    }
+    
+    response = send_json_request(request)
+    if response and response.get("cmd") == "set_event_server_info_rsp" and response.get("ret_code") == 0:
+        logger.info(f"Successfully set event server info: {server_ip}:{server_port}")
+        return True
+    else:
+        logger.error(f"Failed to set event server info: {response}")
+        return False
 
 def listen_for_cds_events(sock, socket_key):
     """Listen for incoming events from CDS server"""
@@ -789,6 +823,88 @@ def update_sim_attribute(cam_in_use):
     for x in range(send_time):
         str_image.append(converted_string[x * send_max_length:(x + 1) * send_max_length])
 
+def handle_sdk_client_connection(client_socket, client_address):
+    """处理来自SDK的单个客户端连接"""
+    logger.info(f"SDK client connected from {client_address}")
+    
+    try:
+        while True:
+            data = client_socket.recv(40960)
+            if not data:
+                break
+                
+            try:
+                message = json.loads(data.decode('utf-8'))
+                logger.info(f"Received data from SDK client {client_address}: {message}")
+                event_type = message.get("event_type")
+                camera_id = message.get("camera_id", "unknown")
+
+                if event_type == "speed":
+                    data_part = message.get("data", {})
+                    speed_event = data_part.get("speed_event", {})
+                    process_speed_data(speed_event, camera_id)
+                elif event_type == "pedestrian":
+                    # 预留给行人事件处理
+                    logger.info(f"Received pedestrian event (not processed yet): {message}")
+                else:
+                    # 处理其他类型的事件
+                    logger.info(f"Received unknown event type '{event_type}': {message}")
+                    
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to decode JSON from SDK client {client_address}: {e}")
+            except Exception as e:
+                logger.error(f"Error processing data from SDK client {client_address}: {e}")
+                
+    except Exception as e:
+        logger.error(f"Error handling SDK client {client_address}: {e}")
+    finally:
+        client_socket.close()
+        logger.info(f"SDK client {client_address} disconnected")
+
+def start_event_server():
+    """启动事件服务器接收SDK发送的速度数据"""
+    global event_server_socket
+    
+    try:
+        event_server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        event_server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        event_server_socket.bind((EVENT_SERVER_IP, EVENT_SERVER_PORT))
+        event_server_socket.listen(5)
+        
+        logger.info(f"Event server started on {EVENT_SERVER_IP}:{EVENT_SERVER_PORT}")
+        
+        while True:
+            try:
+                client_socket, client_address = event_server_socket.accept()
+                # 为每个客户端连接创建新线程
+                client_thread = threading.Thread(
+                    target=handle_sdk_client_connection, 
+                    args=(client_socket, client_address),
+                    daemon=True
+                )
+                client_thread.start()
+                
+            except socket.error as e:
+                if event_server_socket:  # 检查socket是否仍然有效
+                    logger.error(f"Error accepting client connection: {e}")
+                else:
+                    break  # socket已关闭，退出循环
+                    
+    except Exception as e:
+        logger.error(f"Error starting event server: {e}")
+    finally:
+        if event_server_socket:
+            event_server_socket.close()
+            event_server_socket = None
+
+def stop_event_server():
+    """停止事件服务器"""
+    global event_server_socket
+    if event_server_socket:
+        event_server_socket.close()
+        event_server_socket = None
+        logger.info("Event server stopped")
+
 def main():
     """
     Main function to initialize logger, UART, load config, start socket connection
@@ -829,26 +945,18 @@ def main():
     heartbeat_thread.daemon = True
     heartbeat_thread.start()
 
-    # Connect to CDS servers
+    # Start event server to receive event data from SDK
+    logger.info("Starting event server for SDK event data...")
+    event_server_thread = Thread(target=start_event_server)
+    event_server_thread.daemon = True
+    event_server_thread.start()
+
+    # Set event server info in SDK
+    if not sdk_set_event_server_info(EVENT_SERVER_IP, EVENT_SERVER_PORT):
+        logger.warning("Failed to set event server info in SDK, but continuing...")
+
+    # Connect to camera sockets (keeping original camera connections)
     if cam_in_use == 1 or cam_in_use == 3:
-        # # 左摄像头 - 命令端口
-        # cds_left_cmd_address = ("localhost", CDS_SERVER_PORT_LEFT_CMD)
-        # cds_left_cmd_thread = Thread(target=connect_socket, args=(cds_left_cmd_address, 'cds_left_cmd_sock'))
-        # cds_left_cmd_thread.daemon = True
-        # cds_left_cmd_thread.start()
-        
-        # # 左摄像头 - 事件端口
-        # cds_left_event_address = ("localhost", CDS_SERVER_PORT_LEFT_EVENT)
-        # cds_left_event_thread = Thread(target=connect_socket, args=(cds_left_event_address, 'cds_left_event_sock'))
-        # cds_left_event_thread.daemon = True
-        # cds_left_event_thread.start()
-        
-        # # 左摄像头 - 速度端口
-        # cds_left_speed_address = ("localhost", CDS_SERVER_PORT_LEFT_SPEED)
-        # cds_left_speed_thread = Thread(target=connect_socket, args=(cds_left_speed_address, 'cds_left_speed_sock'))
-        # cds_left_speed_thread.daemon = True
-        # cds_left_speed_thread.start()
-        
         # Original camera connections
         cam1_info_address = ("localhost", CAMERA1_PORT)
         cam1_dnn_address = ("localhost", CAMERA1_DNN_PORT)
@@ -860,24 +968,6 @@ def main():
         cam1_dnn_thread.start()
         
     if cam_in_use == 2 or cam_in_use == 3:
-        # # 右摄像头 - 命令端口
-        # cds_right_cmd_address = ("localhost", CDS_SERVER_PORT_RIGHT_CMD)
-        # cds_right_cmd_thread = Thread(target=connect_socket, args=(cds_right_cmd_address, 'cds_right_cmd_sock'))
-        # cds_right_cmd_thread.daemon = True
-        # cds_right_cmd_thread.start()
-        
-        # # 右摄像头 - 事件端口
-        # cds_right_event_address = ("localhost", CDS_SERVER_PORT_RIGHT_EVENT)
-        # cds_right_event_thread = Thread(target=connect_socket, args=(cds_right_event_address, 'cds_right_event_sock'))
-        # cds_right_event_thread.daemon = True
-        # cds_right_event_thread.start()
-        
-        # # 右摄像头 - 速度端口
-        # cds_right_speed_address = ("localhost", CDS_SERVER_PORT_RIGHT_SPEED)
-        # cds_right_speed_thread = Thread(target=connect_socket, args=(cds_right_speed_address, 'cds_right_speed_sock'))
-        # cds_right_speed_thread.daemon = True
-        # cds_right_speed_thread.start()
-        
         # Original camera connections
         cam2_info_address = ("localhost", CAMERA2_PORT)
         cam2_dnn_address = ("localhost", CAMERA2_DNN_PORT)
@@ -887,7 +977,7 @@ def main():
         cam2_dnn_thread.daemon = True
         cam2_info_thread.start()
         cam2_dnn_thread.start()
-        
+
     # Open camera1 shared_memory
     if cam_in_use == 1 or cam_in_use == 3:
         shm_name = CAMERA1_SHM_BMP_NAME
@@ -1109,5 +1199,26 @@ def main():
 
             logger.debug(f"--- {time.time() - start_time} seconds ---")
 
+def signal_handler(sig, frame):
+    """信号处理函数，用于优雅地关闭程序"""
+    logger.info("Received signal to shut down...")
+    stop_event_server()
+    sdk_logout()
+    sys.exit(0)
+
 if __name__ == '__main__':
-    main()
+    # 注册信号处理器
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    try:
+        main()
+    except KeyboardInterrupt:
+        logger.info("Keyboard interrupt received, shutting down...")
+        stop_event_server()
+        sdk_logout()
+    except Exception as e:
+        logger.error(f"Unexpected error in main: {e}")
+        stop_event_server()
+        sdk_logout()
+        raise
