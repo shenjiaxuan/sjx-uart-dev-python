@@ -96,7 +96,11 @@ speed_counts_left = {}  # {direction_class: count}
 speed_counts_right = {}
 speed_data_lock = threading.Lock()
 
-def setup_logger(log_file_path):
+def setup_logger():
+    log_folder_path = Path(LOG_FOLDER)
+    log_folder_path.mkdir(parents=True, exist_ok=True)
+    log_file_path = log_folder_path.joinpath("uart_log.txt")
+
     logger = logging.getLogger("uart_logger")
     logger.setLevel(logging.DEBUG)
     formatter = logging.Formatter(fmt="%(asctime)s [%(levelname)s]: %(message)s",
@@ -116,7 +120,10 @@ def setup_logger(log_file_path):
 
     return logger
 
-def connect_socket(server_address, logger, socket_key):
+# Global logger
+logger = setup_logger()
+
+def connect_socket(server_address, socket_key):
     while True:
         if sockets[socket_key] is not None:
             time.sleep(1)  # If the connection exists, wait briefly
@@ -130,17 +137,18 @@ def connect_socket(server_address, logger, socket_key):
             
             # If this is CDS socket, start listening for events/speeds
             if socket_key in ['cds_left_event_sock', 'cds_right_event_sock']:
-                event_thread = threading.Thread(target=listen_for_cds_events, args=(sock, socket_key, logger), daemon=True)
+                event_thread = threading.Thread(target=listen_for_cds_events, args=(sock, socket_key), daemon=True)
                 event_thread.start()
             elif socket_key in ['cds_left_speed_sock', 'cds_right_speed_sock']:
-                speed_thread = threading.Thread(target=listen_for_cds_speeds, args=(sock, socket_key, logger), daemon=True)
+                speed_thread = threading.Thread(target=listen_for_cds_speeds, args=(sock, socket_key), daemon=True)
                 speed_thread.start()
                 
         except socket.error as e:
             logger.error(f"Failed to connect to {server_address} for {socket_key}: {e}. Retrying in 5 seconds...")
             time.sleep(5)  # Wait 5 seconds and try again
 
-def listen_for_cds_events(sock, socket_key, logger):
+
+def listen_for_cds_events(sock, socket_key):
     """Listen for incoming events from CDS server"""
     global cds_alerts_received, emer_mode, cam1_image_shm_ptr, cam2_image_shm_ptr, cam_in_use
     while True:
@@ -162,7 +170,7 @@ def listen_for_cds_events(sock, socket_key, logger):
                     get_pic_from_socket(cam1_image_shm_ptr, CAM1_ID)
                 if cam_in_use == 2 or cam_in_use == 3:
                     get_pic_from_socket(cam2_image_shm_ptr, CAM2_ID)
-                update_sim_attribute(cam_in_use, logger)
+                update_sim_attribute(cam_in_use)
                 
             elif message.get("type") == "parking":
                 # UART receives parking events but ignores them
@@ -173,7 +181,7 @@ def listen_for_cds_events(sock, socket_key, logger):
             sockets[socket_key] = None
             break
 
-def listen_for_cds_speeds(sock, socket_key, logger):
+def listen_for_cds_speeds(sock, socket_key):
     """Listen for incoming speed data from CDS server"""
     global speed_data_left, speed_data_right, speed_averages_left, speed_averages_right
     
@@ -191,7 +199,7 @@ def listen_for_cds_speeds(sock, socket_key, logger):
                 logger.info(f"Received speed data from {socket_key}: {speed_event}")
                 
                 # Process speed event
-                process_speed_data(speed_event, camera_side, logger)
+                process_speed_data(speed_event, camera_side)
                 
         except Exception as e:
             logger.error(f"Error listening for CDS speeds on {socket_key}: {e}")
@@ -243,7 +251,7 @@ def calculate_speed_sliding_average(direction_class, new_speed, speed_averages, 
     
     return new_avg
 
-def process_speed_data(speed_event, camera_side, logger):
+def process_speed_data(speed_event, camera_side):
     """Process speed event data and update speed averages"""
     global speed_data_left, speed_data_right, speed_averages_left, speed_averages_right
     global speed_counts_left, speed_counts_right
@@ -356,7 +364,7 @@ def get_speed_data_for_uart(camera_side):
         else:
             return {}
 
-def send_data(socket_key, data, logger):
+def send_data(socket_key, data):
     sock = sockets[socket_key]
     if sock is None:
         logger.error("No active socket connection. Cannot send data.")
@@ -368,7 +376,7 @@ def send_data(socket_key, data, logger):
         logger.error(f"Send error: {e}. Setting {socket_key} to None.")
         sockets[socket_key] = None
 
-def receive_data(socket_key, buffer_size, logger):
+def receive_data(socket_key, buffer_size):
     sock = sockets[socket_key]
     if sock is None:
         logger.error("No active socket connection. Cannot receive data.")
@@ -385,7 +393,7 @@ def receive_data(socket_key, buffer_size, logger):
         sockets[socket_key] = None
         return None
 
-def send_cds_command(socket_key, command, logger):
+def send_cds_command(socket_key, command):
     """发送命令到CDS服务器 - 只使用命令socket"""
     sock = sockets[socket_key]
     if sock is None:
@@ -406,7 +414,7 @@ def send_cds_command(socket_key, command, logger):
         sockets[socket_key] = None
         return None
 
-def get_cds_counting_data(logger):
+def get_cds_counting_data():
     """获取CDS计数数据 - 使用命令socket"""
     left_counting_data = {}
     right_counting_data = {}
@@ -414,7 +422,7 @@ def get_cds_counting_data(logger):
     if cam_in_use == 1 or cam_in_use == 3:  # 左摄像头
         if sockets['cds_left_cmd_sock']:  # 使用命令socket
             command = {"cmd": "get_counting"}
-            response = send_cds_command('cds_left_cmd_sock', command, logger)
+            response = send_cds_command('cds_left_cmd_sock', command)
             if response and response.get("status") == "success":
                 data = response.get("counting_data", {})
                 if "left" in data:
@@ -423,7 +431,7 @@ def get_cds_counting_data(logger):
     if cam_in_use == 2 or cam_in_use == 3:  # 右摄像头
         if sockets['cds_right_cmd_sock']:  # 使用命令socket
             command = {"cmd": "get_counting"}
-            response = send_cds_command('cds_right_cmd_sock', command, logger)
+            response = send_cds_command('cds_right_cmd_sock', command)
             if response and response.get("status") == "success":
                 data = response.get("counting_data", {})
                 if "right" in data:
@@ -431,7 +439,7 @@ def get_cds_counting_data(logger):
     
     return left_counting_data, right_counting_data
 
-def process_cumulative_counting(current_data, camera_side, logger):
+def process_cumulative_counting(current_data, camera_side):
     """Process cumulative counting data by subtracting previous values"""
     global previous_counting_data_left, previous_counting_data_right
     
@@ -466,7 +474,7 @@ def process_cumulative_counting(current_data, camera_side, logger):
     
     return period_data
 
-def reformat_counting_for_uart(counting_results, speed_averages, logger):
+def reformat_counting_for_uart(counting_results, speed_averages):
     """Reformat counting data for UART and integrate speed averages"""
     uart_data = dnn_default_dirct.copy()
     
@@ -538,10 +546,10 @@ def get_pic_from_socket(shm_ptr, cam_id):
     tmp_image_path.parent.mkdir(parents=True, exist_ok=True)
     image.save(tmp_image_path)
 
-def get_dnn_date(socket_key, logger):
+def get_dnn_date(socket_key):
     dnn_data_request = DnnDataYolo(cmd=DNN_GET)
-    send_data(socket_key, dnn_data_request.to_bytes(), logger)
-    response = receive_data(socket_key, SOCK_COMM_LEN, logger)
+    send_data(socket_key, dnn_data_request.to_bytes())
+    response = receive_data(socket_key, SOCK_COMM_LEN)
     if response:
         try:
             json_response = response.decode('utf-8')
@@ -553,45 +561,45 @@ def get_dnn_date(socket_key, logger):
     else:
         return None
 
-def camera_control_process(socket_key, command, contol_val, logger):
+def camera_control_process(socket_key, command, contol_val):
     try:
         if command == GET_GAIN:
             gain_data_g = GainData(command)
-            send_data(socket_key, gain_data_g.to_bytes(), logger)
-            response = receive_data(socket_key, SOCK_COMM_LEN, logger)
+            send_data(socket_key, gain_data_g.to_bytes())
+            response = receive_data(socket_key, SOCK_COMM_LEN)
             if response:
                 gain_data_g = GainData.from_bytes(response)
             return gain_data_g.val
 
         elif command == GET_EXPOSURE:
             exposure_data_g = ExposureData(command)
-            send_data(socket_key, exposure_data_g.to_bytes(), logger)
-            response = receive_data(socket_key, SOCK_COMM_LEN, logger)
+            send_data(socket_key, exposure_data_g.to_bytes())
+            response = receive_data(socket_key, SOCK_COMM_LEN)
             if response:
                 exposure_data_g = ExposureData.from_bytes(response)
             return exposure_data_g.val
 
         elif command == GET_AE_MODE:
             ae_mode_data_g = AeModeData(command)
-            send_data(socket_key, ae_mode_data_g.to_bytes(), logger)
-            response = receive_data(socket_key, SOCK_COMM_LEN, logger)
+            send_data(socket_key, ae_mode_data_g.to_bytes())
+            response = receive_data(socket_key, SOCK_COMM_LEN)
             if response:
                 ae_mode_data_g = AeModeData.from_bytes(response)
             return ae_mode_data_g.val
 
         elif command == GET_AWB_MODE:
             awb_mode_data_g = AwbModeData(command)
-            send_data(socket_key, awb_mode_data_g.to_bytes(), logger)
-            response = receive_data(socket_key, SOCK_COMM_LEN, logger)
+            send_data(socket_key, awb_mode_data_g.to_bytes())
+            response = receive_data(socket_key, SOCK_COMM_LEN)
             if response:
                 awb_mode_data_g = AwbModeData.from_bytes(response)
             return awb_mode_data_g.val
         elif command == CAM_EN:
             cam_en = CamEn(command, contol_val)
-            send_data(socket_key, cam_en.to_bytes(), logger)
+            send_data(socket_key, cam_en.to_bytes())
         elif command == ENERGENCY_MODE:
             energency_mode = EnergencyMode(command, contol_val)
-            send_data(socket_key, energency_mode.to_bytes(), logger)
+            send_data(socket_key, energency_mode.to_bytes())
         else:
             logger.error(f"Camera command error: {hex(command)}")
     except socket.timeout:
@@ -617,8 +625,7 @@ def check_camera_errors(path):
         return "1"
 
 class UART:
-    def __init__(self, logger):
-        self.logger = logger
+    def __init__(self):
         self.uartport = serial.Serial(
                 port="/dev/ttymxc2",
                 baudrate=38400,
@@ -633,14 +640,14 @@ class UART:
 
     def send_serial(self, cmd): 
         cmd = str(cmd).rstrip()
-        self.logger.debug(f"UART send ->: {cmd}")
+        logger.debug(f"UART send ->: {cmd}")
         self.uartport.write((cmd+"\n").encode("utf_8"))
 
     def receive_serial(self):
         rcvdata = self.uartport.readline()
         return rcvdata
 
-def save_image_with_target_size(image, cam_in_use, logger):
+def save_image_with_target_size(image, cam_in_use):
     target_size = 12800 #12800 #10240 # 15360 #Bytes
     filepath = './tmp/converted-jpg-image.jpg'
     #quality = 20 & 35 is an experience value
@@ -660,7 +667,7 @@ def save_image_with_target_size(image, cam_in_use, logger):
             quality -= 5
     os.rename(temp_filepath, filepath)
 
-def update_sim_attribute(cam_in_use, logger):
+def update_sim_attribute(cam_in_use):
     global str_image
     if emer_imgage_send == 1:
         return
@@ -675,7 +682,7 @@ def update_sim_attribute(cam_in_use, logger):
         image.paste(image1, (0, 0))
         image.paste(image2, (image1.width, 0))
 
-    save_image_with_target_size(image, cam_in_use, logger)
+    save_image_with_target_size(image, cam_in_use)
 
     with open('./tmp/converted-jpg-image.jpg', 'rb') as image2string:
         converted_string = base64.b64encode(image2string.read()).decode()
@@ -696,11 +703,7 @@ def main():
     global cam1_image_shm_ptr, cam2_image_shm_ptr
     global emer_imgage_send
 
-    log_folder_path = Path(LOG_FOLDER)
-    log_folder_path.mkdir(parents=True, exist_ok=True)
-    log_file_path = log_folder_path.joinpath("uart_log.txt")
-    logger = setup_logger(log_file_path)
-    uart = UART(logger)
+    uart = UART()
     config = load_config(CONFIG_PATH)
     IMAGE_HEIGHT = int(config.get('InputTensorHeith'))
     IMAGE_WIDTH = int(config.get('InputTensorWidth'))
@@ -723,27 +726,27 @@ def main():
     if cam_in_use == 1 or cam_in_use == 3:
         # 左摄像头 - 命令端口
         cds_left_cmd_address = ("localhost", CDS_SERVER_PORT_LEFT_CMD)
-        cds_left_cmd_thread = Thread(target=connect_socket, args=(cds_left_cmd_address, logger, 'cds_left_cmd_sock'))
+        cds_left_cmd_thread = Thread(target=connect_socket, args=(cds_left_cmd_address, 'cds_left_cmd_sock'))
         cds_left_cmd_thread.daemon = True
         cds_left_cmd_thread.start()
         
         # 左摄像头 - 事件端口
         cds_left_event_address = ("localhost", CDS_SERVER_PORT_LEFT_EVENT)
-        cds_left_event_thread = Thread(target=connect_socket, args=(cds_left_event_address, logger, 'cds_left_event_sock'))
+        cds_left_event_thread = Thread(target=connect_socket, args=(cds_left_event_address, 'cds_left_event_sock'))
         cds_left_event_thread.daemon = True
         cds_left_event_thread.start()
         
         # 左摄像头 - 速度端口
         cds_left_speed_address = ("localhost", CDS_SERVER_PORT_LEFT_SPEED)
-        cds_left_speed_thread = Thread(target=connect_socket, args=(cds_left_speed_address, logger, 'cds_left_speed_sock'))
+        cds_left_speed_thread = Thread(target=connect_socket, args=(cds_left_speed_address, 'cds_left_speed_sock'))
         cds_left_speed_thread.daemon = True
         cds_left_speed_thread.start()
         
         # Original camera connections
         cam1_info_address = ("localhost", CAMERA1_PORT)
         cam1_dnn_address = ("localhost", CAMERA1_DNN_PORT)
-        cam1_info_thread = Thread(target=connect_socket, args=(cam1_info_address, logger, 'cam1_info_sock'))
-        cam1_dnn_thread = Thread(target=connect_socket, args=(cam1_dnn_address, logger, 'cam1_dnn_sock'))
+        cam1_info_thread = Thread(target=connect_socket, args=(cam1_info_address, 'cam1_info_sock'))
+        cam1_dnn_thread = Thread(target=connect_socket, args=(cam1_dnn_address, 'cam1_dnn_sock'))
         cam1_info_thread.daemon = True
         cam1_dnn_thread.daemon = True
         cam1_info_thread.start()
@@ -752,27 +755,27 @@ def main():
     if cam_in_use == 2 or cam_in_use == 3:
         # 右摄像头 - 命令端口
         cds_right_cmd_address = ("localhost", CDS_SERVER_PORT_RIGHT_CMD)
-        cds_right_cmd_thread = Thread(target=connect_socket, args=(cds_right_cmd_address, logger, 'cds_right_cmd_sock'))
+        cds_right_cmd_thread = Thread(target=connect_socket, args=(cds_right_cmd_address, 'cds_right_cmd_sock'))
         cds_right_cmd_thread.daemon = True
         cds_right_cmd_thread.start()
         
         # 右摄像头 - 事件端口
         cds_right_event_address = ("localhost", CDS_SERVER_PORT_RIGHT_EVENT)
-        cds_right_event_thread = Thread(target=connect_socket, args=(cds_right_event_address, logger, 'cds_right_event_sock'))
+        cds_right_event_thread = Thread(target=connect_socket, args=(cds_right_event_address, 'cds_right_event_sock'))
         cds_right_event_thread.daemon = True
         cds_right_event_thread.start()
         
         # 右摄像头 - 速度端口
         cds_right_speed_address = ("localhost", CDS_SERVER_PORT_RIGHT_SPEED)
-        cds_right_speed_thread = Thread(target=connect_socket, args=(cds_right_speed_address, logger, 'cds_right_speed_sock'))
+        cds_right_speed_thread = Thread(target=connect_socket, args=(cds_right_speed_address, 'cds_right_speed_sock'))
         cds_right_speed_thread.daemon = True
         cds_right_speed_thread.start()
         
         # Original camera connections
         cam2_info_address = ("localhost", CAMERA2_PORT)
         cam2_dnn_address = ("localhost", CAMERA2_DNN_PORT)
-        cam2_info_thread = Thread(target=connect_socket, args=(cam2_info_address, logger, 'cam2_info_sock'))
-        cam2_dnn_thread = Thread(target=connect_socket, args=(cam2_dnn_address, logger, 'cam2_dnn_sock'))
+        cam2_info_thread = Thread(target=connect_socket, args=(cam2_info_address, 'cam2_info_sock'))
+        cam2_dnn_thread = Thread(target=connect_socket, args=(cam2_dnn_address, 'cam2_dnn_sock'))
         cam2_info_thread.daemon = True
         cam2_dnn_thread.daemon = True
         cam2_info_thread.start()
@@ -804,7 +807,7 @@ def main():
             return
         get_pic_from_socket(cam2_image_shm_ptr, CAM2_ID)
 
-    update_sim_attribute(cam_in_use, logger)
+    update_sim_attribute(cam_in_use)
 
     while True:
         raw_data = uart.receive_serial()
@@ -886,20 +889,20 @@ def main():
                         get_pic_from_socket(cam1_image_shm_ptr, CAM1_ID)
                     if cam_in_use == 2 or cam_in_use == 3:
                         get_pic_from_socket(cam2_image_shm_ptr, CAM2_ID)
-                    update_sim_attribute(cam_in_use, logger)
+                    update_sim_attribute(cam_in_use)
                     
                 # Get counting data from CDS - returns separate left and right data
-                left_counting_data, right_counting_data = get_cds_counting_data(logger)
+                left_counting_data, right_counting_data = get_cds_counting_data()
                 
                 # Process left camera data (cam1)
                 if cam_in_use == 1 or cam_in_use == 3:
                     if left_counting_data:
                         # Process cumulative data to get period counts for left camera
-                        left_period_data = process_cumulative_counting(left_counting_data, "left", logger)
+                        left_period_data = process_cumulative_counting(left_counting_data, "left")
                         # Get speed averages for left camera
                         left_speed_averages = get_speed_data_for_uart("left")
                         # Reformat for UART with speed integration
-                        uart_data = reformat_counting_for_uart(left_period_data, left_speed_averages, logger)
+                        uart_data = reformat_counting_for_uart(left_period_data, left_speed_averages)
                         response = json.dumps(uart_data)
                         uart.send_serial(response)
                     else:
@@ -910,11 +913,11 @@ def main():
                 if cam_in_use == 2 or cam_in_use == 3:
                     if right_counting_data:
                         # Process cumulative data to get period counts for right camera
-                        right_period_data = process_cumulative_counting(right_counting_data, "right", logger)
+                        right_period_data = process_cumulative_counting(right_counting_data, "right")
                         # Get speed averages for right camera
                         right_speed_averages = get_speed_data_for_uart("right")
                         # Reformat for UART with speed integration
-                        uart_data = reformat_counting_for_uart(right_period_data, right_speed_averages, logger)
+                        uart_data = reformat_counting_for_uart(right_period_data, right_speed_averages)
                         response = json.dumps(uart_data)
                         uart.send_serial(response)
                     else:
@@ -936,10 +939,10 @@ def main():
                         if cam_in_use == 1:
                             cam_info_socket = 'cam1_info_sock'
                     current_time = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-                    gain = camera_control_process(cam_info_socket, GET_GAIN, 0, logger)
-                    exposure = camera_control_process(cam_info_socket, GET_EXPOSURE, 0, logger)
-                    ae_model = camera_control_process(cam_info_socket, GET_AE_MODE, 0, logger)
-                    awb_model = camera_control_process(cam_info_socket, GET_AWB_MODE, 0, logger)
+                    gain = camera_control_process(cam_info_socket, GET_GAIN, 0)
+                    exposure = camera_control_process(cam_info_socket, GET_EXPOSURE, 0)
+                    ae_model = camera_control_process(cam_info_socket, GET_AE_MODE, 0)
+                    awb_model = camera_control_process(cam_info_socket, GET_AWB_MODE, 0)
                     ae_status = "auto" if ae_model == 0 else "manual"
                     awb_status = "enable" if awb_model == 0 else "disable"
                     ps_data = {
@@ -970,8 +973,8 @@ def main():
                         if cam_in_use == 1:
                             cam_info_socket = 'cam1_dnn_sock'
                     roi_data_g = RoiData(ROI_GET, 0, [])
-                    send_data(cam_info_socket, roi_data_g.to_bytes(), logger)
-                    response = receive_data(cam_info_socket, SOCK_COMM_LEN, logger)
+                    send_data(cam_info_socket, roi_data_g.to_bytes())
+                    response = receive_data(cam_info_socket, SOCK_COMM_LEN)
                     if response:
                         roi_data_g = RoiData.from_bytes(response)
                     post_processing = {}
