@@ -38,14 +38,6 @@ CONFIG_PATH = '/home/root/AglaiaSense/resource/share_config/gs501.json'
 CAM1_ID = 1
 CAM2_ID = 2
 
-# CDS ports
-CDS_SERVER_PORT_LEFT_CMD = 7170
-CDS_SERVER_PORT_LEFT_EVENT = 7172
-CDS_SERVER_PORT_LEFT_SPEED = 7173
-CDS_SERVER_PORT_RIGHT_CMD = 7171
-CDS_SERVER_PORT_RIGHT_EVENT = 7181
-CDS_SERVER_PORT_RIGHT_SPEED = 7182
-
 # Event Server Configuration (for receiving speed data from SDK)
 EVENT_SERVER_IP = "127.0.0.1"
 EVENT_SERVER_PORT = 1780  # Port for receiving speed events from SDK
@@ -83,13 +75,7 @@ sockets = {
     'cam1_info_sock': None,
     'cam2_info_sock': None,
     'cam1_dnn_sock': None,
-    'cam2_dnn_sock': None,
-    'cds_left_cmd_sock': None,
-    'cds_left_event_sock': None,
-    'cds_left_speed_sock': None,
-    'cds_right_cmd_sock': None,
-    'cds_right_event_sock': None,
-    'cds_right_speed_sock': None
+    'cam2_dnn_sock': None
 }
 
 
@@ -150,14 +136,6 @@ def connect_socket(server_address, socket_key):
             sock.connect(server_address)
             sockets[socket_key] = sock
             logger.info(f"Connected to server at {server_address} for {socket_key}")
-            
-            # If this is CDS socket, start listening for events/speeds
-            if socket_key in ['cds_left_event_sock', 'cds_right_event_sock']:
-                event_thread = threading.Thread(target=listen_for_cds_events, args=(sock, socket_key), daemon=True)
-                event_thread.start()
-            elif socket_key in ['cds_left_speed_sock', 'cds_right_speed_sock']:
-                speed_thread = threading.Thread(target=listen_for_cds_speeds, args=(sock, socket_key), daemon=True)
-                speed_thread.start()
                 
         except socket.error as e:
             logger.error(f"Failed to connect to {server_address} for {socket_key}: {e}. Retrying in 5 seconds...")
@@ -283,64 +261,6 @@ def sdk_set_event_server_info(server_ip, server_port):
     else:
         logger.error(f"Failed to set event server info: {response}")
         return False
-
-def listen_for_cds_events(sock, socket_key):
-    """Listen for incoming events from CDS server"""
-    global cds_alerts_received, emer_mode, cam1_image_shm_ptr, cam2_image_shm_ptr, cam_in_use
-    while True:
-        try:
-            data = sock.recv(4096)
-            if not data:
-                break
-                
-            message = json.loads(data.decode('utf-8'))
-            if message.get("type") == "alert":
-                logger.info(f"Received CDS alert from {socket_key}: {message}")
-                cds_alerts_received = True
-                # Set emergency mode when alert received
-                emer_mode = 1
-                logger.info(f"emer_mode set to {emer_mode} by CDS alert")
-                
-                # Save images to buffer when emer_mode is set to 1
-                if cam_in_use == 1 or cam_in_use == 3:
-                    get_pic_from_socket(cam1_image_shm_ptr, CAM1_ID)
-                if cam_in_use == 2 or cam_in_use == 3:
-                    get_pic_from_socket(cam2_image_shm_ptr, CAM2_ID)
-                update_sim_attribute(cam_in_use)
-                
-            elif message.get("type") == "parking":
-                # UART receives parking events but ignores them
-                logger.info(f"Received CDS parking event from {socket_key} (ignored by UART): {message}")
-                
-        except Exception as e:
-            logger.error(f"Error listening for CDS events on {socket_key}: {e}")
-            sockets[socket_key] = None
-            break
-
-def listen_for_cds_speeds(sock, socket_key):
-    """Listen for incoming speed data from CDS server"""
-    global speed_data_left, speed_data_right, speed_averages_left, speed_averages_right
-    
-    while True:
-        try:
-            data = sock.recv(4096)
-            if not data:
-                break
-                
-            message = json.loads(data.decode('utf-8'))
-            if message.get("type") == "speed":
-                camera_side = message.get("camera")
-                speed_event = message.get("data", {})
-                
-                logger.info(f"Received speed data from {socket_key}: {speed_event}")
-                
-                # Process speed event
-                process_speed_data(speed_event, camera_side)
-                
-        except Exception as e:
-            logger.error(f"Error listening for CDS speeds on {socket_key}: {e}")
-            sockets[socket_key] = None
-            break
 
 def calculate_speed_weighted_average(direction_class, new_speed, speed_averages, speed_counts):
     """
@@ -840,7 +760,7 @@ def handle_sdk_client_connection(client_socket, client_address):
                 camera_id = message.get("camera_id", "unknown")
 
                 if event_type == "speed":
-                    data_part = message.get("data", {})
+                    data_part = message.get("cds_data", {})
                     speed_event = data_part.get("speed_event", {})
                     process_speed_data(speed_event, camera_id)
                 elif event_type == "pedestrian":
