@@ -851,7 +851,9 @@ def main():
     IMAGE_HEIGHT = int(config.get('InputTensorHeith'))
     IMAGE_WIDTH = int(config.get('InputTensorWidth'))
     # cam_in_use: left = 1, right =2, all = 3. note:left is cam1, right is cam2
-    sensor_num = config["SensorNum"]
+    # Load cam_in_use from config.json instead of CONFIG_PATH
+    local_config = load_config("config.json")
+    sensor_num = local_config["cam_in_use"]
     if sensor_num in ["1", "left"]:
         cam_in_use = 1
         profile_index = 1
@@ -972,15 +974,17 @@ def main():
                 response = json.dumps({"CamProfile": int(profile_index)})
                 uart.send_serial(response)
                 if int(profile_index) != cam_in_use:
+                    cam_in_use = int(profile_index)
+                    # Update cam_in_use in config.json instead of CONFIG_PATH
+                    local_config = load_config("config.json")
                     if int(profile_index) == 1:
-                        config["SensorNum"] = "left"
+                        local_config["cam_in_use"] = "left"
                     elif int(profile_index) == 2:
-                        config["SensorNum"] = "right"
+                        local_config["cam_in_use"] = "right"
                     elif int(profile_index) == 3:
-                        config["SensorNum"] = "dual"
-                    with open(CONFIG_PATH, "w", encoding="utf-8") as file:
-                        json.dump(config, file, indent=4)
-                    subprocess.call("reboot", shell=True)
+                        local_config["cam_in_use"] = "dual"
+                    with open("config.json", "w", encoding="utf-8") as file:
+                        json.dump(local_config, file, indent=4)
 
             elif string[:5] == "WiFi|":
                 if get_wifi_status() == 'enabled':
