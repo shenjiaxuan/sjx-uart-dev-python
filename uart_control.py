@@ -1062,58 +1062,64 @@ def main():
             elif string[:3] == "?PS":
                 index = int(string[3:])
                 if index in [1, 2]:
-                    if index == 1:
-                        cam_info_socket = 'cam1_info_sock'
-                        if cam_in_use == 2:
-                            cam_info_socket = 'cam2_info_sock'
-                    else:
-                        cam_info_socket = 'cam2_info_sock'
-                        if cam_in_use == 1:
+                    # 处理PS1和PS2命令
+                    if (index == 1 and (cam_in_use == 1 or cam_in_use == 3)) or (index == 2 and (cam_in_use == 2 or cam_in_use == 3)):
+                        # 选择正确的socket
+                        if index == 1:
                             cam_info_socket = 'cam1_info_sock'
-                    current_time = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-                    gain = camera_control_process(cam_info_socket, GET_GAIN, 0)
-                    exposure = camera_control_process(cam_info_socket, GET_EXPOSURE, 0)
-                    ae_model = camera_control_process(cam_info_socket, GET_AE_MODE, 0)
-                    awb_model = camera_control_process(cam_info_socket, GET_AWB_MODE, 0)
-                    ae_status = "auto" if ae_model == 0 else "manual"
-                    awb_status = "enable" if awb_model == 0 else "disable"
-                    ps_data = {
-                        "CameraFPS": config["CameraFPS"],
-                        "ImageSize": f"{config['InputTensorWidth']}*{config['InputTensorHeith']}",
-                        "PixelDepth": config["PixelDepth"],
-                        "PixelOrder": config["PixelOrder"],
-                        "DNNModel": config["DNNModel"],
-                        "PostProcessingLogic": config["PostProcessingLogic"],
-                        "SendImageQuality": config["SendImageQuality"],
-                        "SendImageSizePercent": config["SendImageSizePercent"],
-                        "AEModel": ae_status,
-                        "Exposure": exposure,
-                        "Gain": gain,
-                        "AWBMode": awb_status,
-                        "Heating": config["Heating"],
-                        "Time": current_time
-                    }
-                    response = json.dumps(ps_data)
+                        else:  # index == 2
+                            cam_info_socket = 'cam2_info_sock'
+                        
+                        current_time = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+                        gain = camera_control_process(cam_info_socket, GET_GAIN, 0)
+                        exposure = camera_control_process(cam_info_socket, GET_EXPOSURE, 0)
+                        ae_model = camera_control_process(cam_info_socket, GET_AE_MODE, 0)
+                        awb_model = camera_control_process(cam_info_socket, GET_AWB_MODE, 0)
+                        ae_status = "auto" if ae_model == 0 else "manual"
+                        awb_status = "enable" if awb_model == 0 else "disable"
+                        ps_data = {
+                            "CameraFPS": config["CameraFPS"],
+                            "ImageSize": f"{config['InputTensorWidth']}*{config['InputTensorHeith']}",
+                            "PixelDepth": config["PixelDepth"],
+                            "PixelOrder": config["PixelOrder"],
+                            "DNNModel": config["DNNModel"],
+                            "PostProcessingLogic": config["PostProcessingLogic"],
+                            "SendImageQuality": config["SendImageQuality"],
+                            "SendImageSizePercent": config["SendImageSizePercent"],
+                            "AEModel": ae_status,
+                            "Exposure": exposure,
+                            "Gain": gain,
+                            "AWBMode": awb_status,
+                            "Heating": config["Heating"],
+                            "Time": current_time
+                        }
+                        response = json.dumps(ps_data)
+                    else:
+                        # 不符合条件时发送空字典
+                        response = json.dumps({})
                     uart.send_serial(response)
                 elif index in [3, 4]:
-                    if index == 3:
-                        cam_info_socket = 'cam1_dnn_sock'
-                        if cam_in_use == 2:
-                            cam_info_socket = 'cam2_dnn_sock'
-                    else:
-                        cam_info_socket = 'cam2_dnn_sock'
-                        if cam_in_use == 1:
+                    # 处理PS3和PS4命令
+                    if (index == 3 and (cam_in_use == 1 or cam_in_use == 3)) or (index == 4 and (cam_in_use == 2 or cam_in_use == 3)):
+                        # 选择正确的socket
+                        if index == 3:
                             cam_info_socket = 'cam1_dnn_sock'
-                    roi_data_g = RoiData(ROI_GET, 0, [])
-                    send_data(cam_info_socket, roi_data_g.to_bytes())
-                    response = receive_data(cam_info_socket, SOCK_COMM_LEN)
-                    if response:
-                        roi_data_g = RoiData.from_bytes(response)
-                    post_processing = {}
-                    for i in range(roi_data_g.point_number):
-                        post_processing[f"x{i+1}"] = str(roi_data_g.x[i])
-                        post_processing[f"y{i+1}"] = str(roi_data_g.y[i])
-                    response = json.dumps(post_processing)
+                        else:  # index == 4
+                            cam_info_socket = 'cam2_dnn_sock'
+                        
+                        roi_data_g = RoiData(ROI_GET, 0, [])
+                        send_data(cam_info_socket, roi_data_g.to_bytes())
+                        response = receive_data(cam_info_socket, SOCK_COMM_LEN)
+                        if response:
+                            roi_data_g = RoiData.from_bytes(response)
+                        post_processing = {}
+                        for i in range(roi_data_g.point_number):
+                            post_processing[f"x{i+1}"] = str(roi_data_g.x[i])
+                            post_processing[f"y{i+1}"] = str(roi_data_g.y[i])
+                        response = json.dumps(post_processing)
+                    else:
+                        # 不符合条件时发送空字典
+                        response = json.dumps({})
                     uart.send_serial(response)
                 elif (index - 5) < len(str_image):
                     if index == 5 and emer_mode == 1:
