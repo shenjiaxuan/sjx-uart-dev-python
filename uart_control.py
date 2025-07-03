@@ -562,10 +562,12 @@ def process_cumulative_counting(current_data, camera_side):
     
     return period_data
 
-def reformat_counting_for_uart(counting_results, speed_averages):
+def reformat_counting_for_uart(counting_results, speed_averages, base_uart_data=None):
     """Reformat counting data for UART and integrate speed averages"""
-    uart_data = dnn_default_dirct.copy()
-    
+    if base_uart_data is None:
+        uart_data = dnn_default_dirct.copy()
+    else:
+        uart_data = base_uart_data.copy()
     try:
         # Process single camera counting results
         for boundary, counts in counting_results.items():
@@ -592,17 +594,19 @@ def reformat_counting_for_uart(counting_results, speed_averages):
                     uart_key = direction + vehicle_mapping[vehicle_type]
                     speed_key = uart_key + "spd"
                     
-                    if uart_key in uart_data:
+                    if uart_key in uart_data and uart_data[uart_key] != -1:  # 只处理支持的类别
                         uart_data[uart_key] = count  # Single camera data
                         
-                        # Set speed from averages or -1 if no data/count is 0
+                        # Set speed based on count and averages
                         direction_class = direction + vehicle_mapping[vehicle_type]
                         if count > 0 and direction_class in speed_averages:
                             uart_data[speed_key] = int(round(speed_averages[direction_class]))
                         elif count == 0:
-                            uart_data[speed_key] = 0
+                            uart_data[speed_key] = 0  # 计数为0时速度为0
                         else:
-                            uart_data[speed_key] = -1
+                            # 如果有计数但没有速度数据，保持原有的速度值（可能是0或之前的值）
+                            if uart_data[speed_key] == -1:
+                                uart_data[speed_key] = 0  # 如果是不支持的类别，保持-1；否则设为0
                         
     except Exception as e:
         logger.error(f"Error reformatting counting data: {e}")
@@ -874,6 +878,38 @@ def stop_event_server():
         event_server_socket = None
         logger.info("Event server stopped")
 
+def create_uart_data_from_traffic_categories(traffic_data):
+    """
+    根据交通类别信息创建基础的uart_data
+    支持的类别默认值为0，不支持的类别为-1
+    """
+    # 从默认值开始（所有值都是-1，表示不支持）
+    uart_data = dnn_default_dirct.copy()
+    # 获取line_categories列表
+    categories = traffic_data.get("categories", {})
+    line_categories = categories.get("line_categories", [])
+    
+    # 车辆类型映射
+    vehicle_mapping = {
+        'car': 'car',
+        'truck': 'truck', 
+        'bus': 'bus',
+        'pedestrian': 'ped',
+        'cycle': 'cycle'
+    }
+    
+    # 根据支持的类别设置默认值为0
+    for category in line_categories:
+        if category in vehicle_mapping:
+            mapped_type = vehicle_mapping[category]
+            # 设置进入和离开方向的计数和速度
+            uart_data[f"in{mapped_type}"] = 0
+            uart_data[f"in{mapped_type}spd"] = 0
+            uart_data[f"out{mapped_type}"] = 0
+            uart_data[f"out{mapped_type}spd"] = 0
+    
+    return uart_data
+
 def main():
     """
     Main function to initialize logger, UART, load config, start socket connection
@@ -1070,7 +1106,8 @@ def main():
                     # 选择左摄像头的socket
                     cam_info_socket = 'cam1_info_sock'
                     # 发送JSON格式的请求获取交通类别信息
-                    traffic_request = {"cmd": "traffic_category"}
+                    # traffic_request = {"cmd": "traffic_category"}
+                    traffic_request = {"cmd": "drawing"}
                     traffic_request_json = json.dumps(traffic_request)
                     send_data(cam_info_socket, traffic_request_json.encode('utf-8'))
                     response = receive_data(cam_info_socket, 4096)
@@ -1079,7 +1116,7 @@ def main():
                         try:
                             # 检查响应是否为有效的JSON
                             left_traffic_data = json.loads(response.decode('utf-8'))
-                            logger.info(f"Left camera traffic category data: {left_traffic_data}")
+                            # logger.info(f"Left camera traffic category data: {left_traffic_data}")
                         except json.JSONDecodeError as e:
                             logger.error(f"Failed to decode left traffic category response: {e}")
                         except Exception as e:
@@ -1090,7 +1127,8 @@ def main():
                     # 选择右摄像头的socket
                     cam_info_socket = 'cam2_info_sock'
                     # 发送JSON格式的请求获取交通类别信息
-                    traffic_request = {"cmd": "traffic_category"}
+                    # traffic_request = {"cmd": "traffic_category"}
+                    traffic_request = {"cmd": "drawing"}
                     traffic_request_json = json.dumps(traffic_request)
                     send_data(cam_info_socket, traffic_request_json.encode('utf-8'))
                     response = receive_data(cam_info_socket, 4096)
@@ -1099,7 +1137,7 @@ def main():
                         try:
                             # 检查响应是否为有效的JSON
                             right_traffic_data = json.loads(response.decode('utf-8'))
-                            logger.info(f"Right camera traffic category data: {right_traffic_data}")
+                            # logger.info(f"Right camera traffic category data: {right_traffic_data}")
                         except json.JSONDecodeError as e:
                             logger.error(f"Failed to decode right traffic category response: {e}")
                         except Exception as e:
@@ -1110,59 +1148,46 @@ def main():
                 
                 # Process left camera data (cam1)
                 if cam_in_use == 1 or cam_in_use == 3:
+                    # 根据交通类别信息创建基础uart_data
+                    if left_traffic_data:
+                        base_uart_data = create_uart_data_from_traffic_categories(left_traffic_data)
+                    else:
+                        base_uart_data = dnn_default_dirct.copy()
                     if left_counting_data:
                         # Process cumulative data to get period counts for left camera
                         left_period_data = process_cumulative_counting(left_counting_data, "left")
                         # Get speed averages for left camera
                         left_speed_averages = get_speed_data_for_uart("left")
-                        # Reformat for UART with speed integration
-                        uart_data = reformat_counting_for_uart(left_period_data, left_speed_averages)
-                        
-                        # 合并交通类别信息到uart_data
-                        if left_traffic_data:
-                            # 根据实际的交通类别数据结构进行合并
-                            # 这里假设left_traffic_data可以直接与uart_data合并
-                            uart_data.update(left_traffic_data)
-                            
-                        response = json.dumps(uart_data)
-                        uart.send_serial(response)
+                        # Reformat for UART with speed integration using base data
+                        uart_data = reformat_counting_for_uart(left_period_data, left_speed_averages, base_uart_data)
                     else:
-                        # 如果没有计数数据但有交通类别数据，则使用交通类别数据
-                        if left_traffic_data:
-                            uart_data = dnn_default_dirct.copy()
-                            uart_data.update(left_traffic_data)
-                            response = json.dumps(uart_data)
-                        else:
-                            response = json.dumps(dnn_default_dirct)
-                        uart.send_serial(response)
+                        # 如果没有计数数据，使用基础数据
+                        uart_data = base_uart_data
+                    
+                    response = json.dumps(uart_data)
+                    uart.send_serial(response)
                 
                 # Process right camera data (cam2)
                 if cam_in_use == 2 or cam_in_use == 3:
+                    # 根据交通类别信息创建基础uart_data
+                    if right_traffic_data:
+                        base_uart_data = create_uart_data_from_traffic_categories(right_traffic_data)
+                    else:
+                        base_uart_data = dnn_default_dirct.copy()
+                    
                     if right_counting_data:
                         # Process cumulative data to get period counts for right camera
                         right_period_data = process_cumulative_counting(right_counting_data, "right")
                         # Get speed averages for right camera
                         right_speed_averages = get_speed_data_for_uart("right")
-                        # Reformat for UART with speed integration
-                        uart_data = reformat_counting_for_uart(right_period_data, right_speed_averages)
-                        
-                        # 合并交通类别信息到uart_data
-                        if right_traffic_data:
-                            # 根据实际的交通类别数据结构进行合并
-                            # 这里假设right_traffic_data可以直接与uart_data合并
-                            uart_data.update(right_traffic_data)
-                            
-                        response = json.dumps(uart_data)
-                        uart.send_serial(response)
+                        # Reformat for UART with speed integration using base data
+                        uart_data = reformat_counting_for_uart(right_period_data, right_speed_averages, base_uart_data)
                     else:
-                        # 如果没有计数数据但有交通类别数据，则使用交通类别数据
-                        if right_traffic_data:
-                            uart_data = dnn_default_dirct.copy()
-                            uart_data.update(right_traffic_data)
-                            response = json.dumps(uart_data)
-                        else:
-                            response = json.dumps(dnn_default_dirct)
-                        uart.send_serial(response)
+                        # 如果没有计数数据，使用基础数据
+                        uart_data = base_uart_data
+                    
+                    response = json.dumps(uart_data)
+                    uart.send_serial(response)
                 
                 # Reset speed data for next cycle
                 reset_speed_data()
@@ -1235,7 +1260,6 @@ def main():
                     else:
                         # 不符合条件时发送空字典
                         response = json.dumps({})
-                    print("----------len(response)", len(response))
                     uart.send_serial(response)
                 elif (index - 5) < len(str_image):
                     if index == 5 and emer_mode == 1:
