@@ -1107,16 +1107,27 @@ def main():
                         else:  # index == 4
                             cam_info_socket = 'cam2_dnn_sock'
                         
-                        roi_data_g = RoiData(ROI_GET, 0, [])
-                        send_data(cam_info_socket, roi_data_g.to_bytes())
+                        # 发送JSON格式的drawing命令
+                        roi_request = {"cmd": "drawing"}
+                        roi_request_json = json.dumps(roi_request)
+                        send_data(cam_info_socket, roi_request_json.encode('utf-8'))
                         response = receive_data(cam_info_socket, SOCK_COMM_LEN)
+                        
+                        # 直接使用收到的JSON响应
                         if response:
-                            roi_data_g = RoiData.from_bytes(response)
-                        post_processing = {}
-                        for i in range(roi_data_g.point_number):
-                            post_processing[f"x{i+1}"] = str(roi_data_g.x[i])
-                            post_processing[f"y{i+1}"] = str(roi_data_g.y[i])
-                        response = json.dumps(post_processing)
+                            try:
+                                # 检查响应是否为有效的JSON
+                                json_response = json.loads(response.decode('utf-8'))
+                                # 直接使用收到的JSON响应
+                                response = response.decode('utf-8')
+                            except json.JSONDecodeError as e:
+                                logger.error(f"Failed to decode ROI response: {e}")
+                                response = json.dumps({})
+                            except Exception as e:
+                                logger.error(f"Error processing ROI response: {e}")
+                                response = json.dumps({})
+                        else:
+                            response = json.dumps({})
                     else:
                         # 不符合条件时发送空字典
                         response = json.dumps({})
