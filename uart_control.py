@@ -46,8 +46,8 @@ event_server_thread = None
 
 # SDK config
 SDK_SERVER_IP = '127.0.0.1'
-SDK_JSON_PORT = 1880
-SDK_BINARY_PORT = 1881
+SDK_JSON_PORT = 880
+SDK_BINARY_PORT = 881
 SDK_USER_NAME = "sdk_user"
 SDK_USER_PASSWD = "sdk_password"
 sdk_token = None
