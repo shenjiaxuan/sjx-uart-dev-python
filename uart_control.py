@@ -73,9 +73,7 @@ dnn_default_dirct = {"spdunit":"KPH","incar":-1,"incarspd":-1,"inbus":-1,"inbuss
 
 sockets = {
     'cam1_info_sock': None,
-    'cam2_info_sock': None,
-    'cam1_dnn_sock': None,
-    'cam2_dnn_sock': None
+    'cam2_info_sock': None
 }
 
 
@@ -638,20 +636,7 @@ def get_pic_from_socket(shm_ptr, cam_id):
     tmp_image_path.parent.mkdir(parents=True, exist_ok=True)
     image.save(tmp_image_path)
 
-def get_dnn_date(socket_key):
-    dnn_data_request = DnnDataYolo(cmd=DNN_GET)
-    send_data(socket_key, dnn_data_request.to_bytes())
-    response = receive_data(socket_key, SOCK_COMM_LEN)
-    if response:
-        try:
-            json_response = response.decode('utf-8')
-            dnn_dict = DnnDataYolo.from_json(json_response)
-            return dnn_dict
-        except Exception as e:
-            logger.error(f"Failed to decode or parse DNN data: {e}")
-            return None
-    else:
-        return None
+
 
 def camera_control_process(socket_key, command, contol_val):
     try:
@@ -962,28 +947,18 @@ def main():
     if not sdk_set_event_server_info(EVENT_SERVER_IP, EVENT_SERVER_PORT):
         logger.warning("Failed to set event server info in SDK, but continuing...")
 
-    # Connect to camera sockets (keeping original camera connections)
+    # Connect to camera sockets
     if cam_in_use == 1 or cam_in_use == 3:
-        # Original camera connections
         cam1_info_address = ("localhost", CAMERA1_PORT)
-        cam1_dnn_address = ("localhost", CAMERA1_DNN_PORT)
         cam1_info_thread = Thread(target=connect_socket, args=(cam1_info_address, 'cam1_info_sock'))
-        cam1_dnn_thread = Thread(target=connect_socket, args=(cam1_dnn_address, 'cam1_dnn_sock'))
         cam1_info_thread.daemon = True
-        cam1_dnn_thread.daemon = True
         cam1_info_thread.start()
-        cam1_dnn_thread.start()
         
     if cam_in_use == 2 or cam_in_use == 3:
-        # Original camera connections
         cam2_info_address = ("localhost", CAMERA2_PORT)
-        cam2_dnn_address = ("localhost", CAMERA2_DNN_PORT)
         cam2_info_thread = Thread(target=connect_socket, args=(cam2_info_address, 'cam2_info_sock'))
-        cam2_dnn_thread = Thread(target=connect_socket, args=(cam2_dnn_address, 'cam2_dnn_sock'))
         cam2_info_thread.daemon = True
-        cam2_dnn_thread.daemon = True
         cam2_info_thread.start()
-        cam2_dnn_thread.start()
 
     # Open camera1 shared_memory
     if cam_in_use == 1 or cam_in_use == 3:
