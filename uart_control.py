@@ -46,8 +46,8 @@ event_server_thread = None
 
 # SDK config
 SDK_SERVER_IP = '127.0.0.1'
-SDK_JSON_PORT = 880
-SDK_BINARY_PORT = 881
+SDK_JSON_PORT = 1880
+SDK_BINARY_PORT = 1881
 SDK_USER_NAME = "sdk_user"
 SDK_USER_PASSWD = "sdk_password"
 sdk_token = None
@@ -419,6 +419,44 @@ def get_speed_data_for_uart(camera_side):
             return dict(speed_averages_right)
         else:
             return {}
+
+def process_coordinates_response(coordinates_data):
+    """
+    处理coordinates数据，将所有坐标值转换为整数
+    """
+    try:
+        if not coordinates_data:
+            return json.dumps({})
+            
+        # 解析coordinates数据
+        coordinates = json.loads(coordinates_data.decode('utf-8'))
+        processed_coordinates = {}
+        
+        for key, coord_list in coordinates.items():
+            if isinstance(coord_list, list):
+                processed_coord_list = []
+                for coord in coord_list:
+                    if isinstance(coord, dict) and 'x' in coord and 'y' in coord:
+                        processed_coord = {
+                            'x': int(coord['x']),
+                            'y': int(coord['y'])
+                        }
+                        processed_coord_list.append(processed_coord)
+                    else:
+                        processed_coord_list.append(coord)
+                processed_coordinates[key] = processed_coord_list
+            else:
+                processed_coordinates[key] = coord_list
+        
+        # 返回处理后的coordinates数据
+        return json.dumps(processed_coordinates)
+        
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to decode coordinates data: {e}")
+        return json.dumps({})
+    except Exception as e:
+        logger.error(f"Error processing coordinates data: {e}")
+        return json.dumps({})
 
 def send_data(socket_key, data):
     sock = sockets[socket_key]
@@ -1022,7 +1060,51 @@ def main():
                     if cam_in_use == 2 or cam_in_use == 3:
                         get_pic_from_socket(cam2_image_shm_ptr, CAM2_ID)
                     update_sim_attribute(cam_in_use)
+                
+                # 获取交通类别信息
+                left_traffic_data = {}
+                right_traffic_data = {}
+                
+                # 获取左摄像头交通类别信息
+                if cam_in_use == 1 or cam_in_use == 3:
+                    # 选择左摄像头的socket
+                    cam_info_socket = 'cam1_info_sock'
+                    # 发送JSON格式的请求获取交通类别信息
+                    traffic_request = {"cmd": "traffic_category"}
+                    traffic_request_json = json.dumps(traffic_request)
+                    send_data(cam_info_socket, traffic_request_json.encode('utf-8'))
+                    response = receive_data(cam_info_socket, 4096)
                     
+                    if response:
+                        try:
+                            # 检查响应是否为有效的JSON
+                            left_traffic_data = json.loads(response.decode('utf-8'))
+                            logger.info(f"Left camera traffic category data: {left_traffic_data}")
+                        except json.JSONDecodeError as e:
+                            logger.error(f"Failed to decode left traffic category response: {e}")
+                        except Exception as e:
+                            logger.error(f"Error processing left traffic category response: {e}")
+                
+                # 获取右摄像头交通类别信息
+                if cam_in_use == 2 or cam_in_use == 3:
+                    # 选择右摄像头的socket
+                    cam_info_socket = 'cam2_info_sock'
+                    # 发送JSON格式的请求获取交通类别信息
+                    traffic_request = {"cmd": "traffic_category"}
+                    traffic_request_json = json.dumps(traffic_request)
+                    send_data(cam_info_socket, traffic_request_json.encode('utf-8'))
+                    response = receive_data(cam_info_socket, 4096)
+                    
+                    if response:
+                        try:
+                            # 检查响应是否为有效的JSON
+                            right_traffic_data = json.loads(response.decode('utf-8'))
+                            logger.info(f"Right camera traffic category data: {right_traffic_data}")
+                        except json.JSONDecodeError as e:
+                            logger.error(f"Failed to decode right traffic category response: {e}")
+                        except Exception as e:
+                            logger.error(f"Error processing right traffic category response: {e}")
+                
                 # Get counting data from CDS - returns separate left and right data
                 left_counting_data, right_counting_data = get_cds_counting_data()
                 
@@ -1035,10 +1117,23 @@ def main():
                         left_speed_averages = get_speed_data_for_uart("left")
                         # Reformat for UART with speed integration
                         uart_data = reformat_counting_for_uart(left_period_data, left_speed_averages)
+                        
+                        # 合并交通类别信息到uart_data
+                        if left_traffic_data:
+                            # 根据实际的交通类别数据结构进行合并
+                            # 这里假设left_traffic_data可以直接与uart_data合并
+                            uart_data.update(left_traffic_data)
+                            
                         response = json.dumps(uart_data)
                         uart.send_serial(response)
                     else:
-                        response = json.dumps(dnn_default_dirct)
+                        # 如果没有计数数据但有交通类别数据，则使用交通类别数据
+                        if left_traffic_data:
+                            uart_data = dnn_default_dirct.copy()
+                            uart_data.update(left_traffic_data)
+                            response = json.dumps(uart_data)
+                        else:
+                            response = json.dumps(dnn_default_dirct)
                         uart.send_serial(response)
                 
                 # Process right camera data (cam2)
@@ -1050,10 +1145,23 @@ def main():
                         right_speed_averages = get_speed_data_for_uart("right")
                         # Reformat for UART with speed integration
                         uart_data = reformat_counting_for_uart(right_period_data, right_speed_averages)
+                        
+                        # 合并交通类别信息到uart_data
+                        if right_traffic_data:
+                            # 根据实际的交通类别数据结构进行合并
+                            # 这里假设right_traffic_data可以直接与uart_data合并
+                            uart_data.update(right_traffic_data)
+                            
                         response = json.dumps(uart_data)
                         uart.send_serial(response)
                     else:
-                        response = json.dumps(dnn_default_dirct)
+                        # 如果没有计数数据但有交通类别数据，则使用交通类别数据
+                        if right_traffic_data:
+                            uart_data = dnn_default_dirct.copy()
+                            uart_data.update(right_traffic_data)
+                            response = json.dumps(uart_data)
+                        else:
+                            response = json.dumps(dnn_default_dirct)
                         uart.send_serial(response)
                 
                 # Reset speed data for next cycle
@@ -1103,34 +1211,31 @@ def main():
                     if (index == 3 and (cam_in_use == 1 or cam_in_use == 3)) or (index == 4 and (cam_in_use == 2 or cam_in_use == 3)):
                         # 选择正确的socket
                         if index == 3:
-                            cam_info_socket = 'cam1_dnn_sock'
+                            cam_info_socket = 'cam1_info_sock'
                         else:  # index == 4
-                            cam_info_socket = 'cam2_dnn_sock'
-                        
+                            cam_info_socket = 'cam2_info_sock'
                         # 发送JSON格式的drawing命令
                         roi_request = {"cmd": "drawing"}
                         roi_request_json = json.dumps(roi_request)
                         send_data(cam_info_socket, roi_request_json.encode('utf-8'))
-                        response = receive_data(cam_info_socket, SOCK_COMM_LEN)
-                        
-                        # 直接使用收到的JSON响应
+                        response = receive_data(cam_info_socket, 4096)
+                        # 解析响应，只提取coordinates部分传给处理函数
                         if response:
                             try:
-                                # 检查响应是否为有效的JSON
                                 json_response = json.loads(response.decode('utf-8'))
-                                # 直接使用收到的JSON响应
-                                response = response.decode('utf-8')
-                            except json.JSONDecodeError as e:
-                                logger.error(f"Failed to decode ROI response: {e}")
-                                response = json.dumps({})
+                                coordinates_data = json_response.get('coordinates', {})
+                                # 将coordinates数据编码为bytes传给处理函数
+                                coordinates_bytes = json.dumps(coordinates_data).encode('utf-8')
+                                response = process_coordinates_response(coordinates_bytes)
                             except Exception as e:
-                                logger.error(f"Error processing ROI response: {e}")
+                                logger.error(f"Error extracting coordinates: {e}")
                                 response = json.dumps({})
                         else:
                             response = json.dumps({})
                     else:
                         # 不符合条件时发送空字典
                         response = json.dumps({})
+                    print("----------len(response)", len(response))
                     uart.send_serial(response)
                 elif (index - 5) < len(str_image):
                     if index == 5 and emer_mode == 1:
