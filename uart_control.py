@@ -23,6 +23,25 @@ import logging
 from logging.handlers import RotatingFileHandler
 
 # ================================
+# CAMERA CONFIGURATION LOGIC
+# ================================
+# cam_in_use_actual: 实际硬件配置，从gs501.json读取，程序运行期间不变
+#   1 = 仅左摄像头可用
+#   2 = 仅右摄像头可用  
+#   3 = 双摄像头可用
+#
+# cam_in_use: 当前输出模式，可通过UART命令或config.json配置
+#   1 = 输出左摄像头数据
+#   2 = 输出右摄像头数据
+#   3 = 输出双摄像头数据
+#
+# 验证规则: cam_in_use必须被cam_in_use_actual支持
+#   - 如果actual=3，则in_use可以是1,2,3
+#   - 如果actual=1，则in_use只能是1
+#   - 如果actual=2，则in_use只能是2
+# ================================
+
+# ================================
 # SPEED CALCULATION CONFIGURATION
 # ================================
 # Choose speed calculation method:
@@ -81,6 +100,7 @@ sockets = {
 cam1_image_shm_ptr = None
 cam2_image_shm_ptr = None
 cam_in_use = 1
+cam_in_use_actual = 1  # Actual hardware configuration from gs501.json
 
 # CDS related globals
 previous_counting_data_left = {}
@@ -792,17 +812,30 @@ def handle_sdk_client_connection(client_socket, client_address):
                     process_speed_data(speed_event, camera_id)
                 elif event_type == "pedestrian":
                     logger.info(f"Received CDS alert from {client_address}: {message}")
-                    cds_alerts_received = True
-                    # Set emergency mode when alert received
-                    emer_mode = 1
-                    logger.info(f"emer_mode set to {emer_mode} by CDS alert")
                     
-                    # Save images to buffer when emer_mode is set to 1
-                    if cam_in_use == 1 or cam_in_use == 3:
-                        get_pic_from_socket(cam1_image_shm_ptr, CAM1_ID)
-                    if cam_in_use == 2 or cam_in_use == 3:
-                        get_pic_from_socket(cam2_image_shm_ptr, CAM2_ID)
-                    update_sim_attribute(cam_in_use)
+                    # 验证报警来源的相机是否与当前使用的相机配置匹配
+                    should_process_alert = False
+                    if camera_id == "left" and (cam_in_use == 1 or cam_in_use == 3):
+                        should_process_alert = True
+                        logger.info(f"Processing pedestrian alert from left camera (cam_in_use={cam_in_use})")
+                    elif camera_id == "right" and (cam_in_use == 2 or cam_in_use == 3):
+                        should_process_alert = True
+                        logger.info(f"Processing pedestrian alert from right camera (cam_in_use={cam_in_use})")
+                    else:
+                        logger.info(f"Ignoring pedestrian alert from {camera_id} camera (cam_in_use={cam_in_use})")
+                    
+                    if should_process_alert:
+                        cds_alerts_received = True
+                        # Set emergency mode when alert received
+                        emer_mode = 1
+                        logger.info(f"emer_mode set to {emer_mode} by CDS alert from {camera_id} camera")
+                        
+                        # Save images to buffer when emer_mode is set to 1
+                        if cam_in_use == 1 or cam_in_use == 3:
+                            get_pic_from_socket(cam1_image_shm_ptr, CAM1_ID)
+                        if cam_in_use == 2 or cam_in_use == 3:
+                            get_pic_from_socket(cam2_image_shm_ptr, CAM2_ID)
+                        update_sim_attribute(cam_in_use)
                 elif event_type == "parking":
                     logger.info(f"Received parking event: {message}")
                 else:
@@ -884,16 +917,37 @@ def create_uart_data_from_traffic_categories(traffic_data):
     }
     
     # 根据支持的类别设置默认值为0
-    for category in line_categories:
-        if category in vehicle_mapping:
-            mapped_type = vehicle_mapping[category]
-            # 设置进入和离开方向的计数和速度
-            uart_data[f"in{mapped_type}"] = 0
-            uart_data[f"in{mapped_type}spd"] = 0
-            uart_data[f"out{mapped_type}"] = 0
-            uart_data[f"out{mapped_type}spd"] = 0
+    for category_str in line_categories:
+        # 每个category_str是通过"-"连接的多个类型，如"car-bus"
+        categories = category_str.split("-")
+        for category in categories:
+            if category in vehicle_mapping:
+                mapped_type = vehicle_mapping[category]
+                # 设置进入和离开方向的计数和速度
+                uart_data[f"in{mapped_type}"] = 0
+                uart_data[f"in{mapped_type}spd"] = 0
+                uart_data[f"out{mapped_type}"] = 0
+                uart_data[f"out{mapped_type}spd"] = 0
     
     return uart_data
+
+def validate_cam_in_use(requested_cam_in_use, actual_cam_in_use):
+    """
+    验证请求的相机配置是否被实际硬件支持
+    
+    Args:
+        requested_cam_in_use (int): 请求的相机配置 (1=左, 2=右, 3=双摄)
+        actual_cam_in_use (int): 实际硬件配置 (1=仅左, 2=仅右, 3=双摄)
+    
+    Returns:
+        bool: True if supported, False otherwise
+    """
+    # 双摄硬件支持所有配置
+    if actual_cam_in_use == 3:
+        return requested_cam_in_use in [1, 2, 3]
+    
+    # 单摄硬件只支持对应的配置
+    return requested_cam_in_use == actual_cam_in_use
 
 def main():
     """
@@ -901,32 +955,32 @@ def main():
     and handle UART commands.
     """
     global count_interval, profile_index, emer_mode
-    global IMAGE_HEIGHT, IMAGE_WIDTH, cam_in_use
+    global IMAGE_HEIGHT, IMAGE_WIDTH, cam_in_use, cam_in_use_actual
     global cam1_image_shm_ptr, cam2_image_shm_ptr
     global emer_imgage_send
 
     uart = UART()
+    
+    # Step 1: Read actual hardware configuration from gs501.json
     config = load_config(CONFIG_PATH)
     IMAGE_HEIGHT = int(config.get('InputTensorHeith'))
     IMAGE_WIDTH = int(config.get('InputTensorWidth'))
-    # cam_in_use: left = 1, right =2, all = 3. note:left is cam1, right is cam2
-    # Load cam_in_use from config.json instead of CONFIG_PATH
-    local_config = load_config("config.json")
-    sensor_num = local_config["cam_in_use"]
-    if sensor_num in ["1", "left"]:
-        cam_in_use = 1
-        profile_index = 1
-    elif sensor_num in ["2", "right"]:
-        cam_in_use = 2
-        profile_index = 2
-    elif sensor_num in ["3", "dual"]:
-        cam_in_use = 3
-        profile_index = 3
+    
+    # 确定实际硬件配置 - 程序运行期间不会改变
+    sensor_num_actual_str = config.get("SensorNum", "dual")
+    if sensor_num_actual_str == "left":
+        cam_in_use_actual = 1  # 仅左摄像头可用
+    elif sensor_num_actual_str == "right":
+        cam_in_use_actual = 2  # 仅右摄像头可用
+    elif sensor_num_actual_str == "dual":
+        cam_in_use_actual = 3  # 双摄像头可用
     else:
-        logger.error(f"Invalid SensorNum value: {sensor_num}")
-        cam_in_use = 1
+        logger.error(f"Invalid SensorNum in gs501.json: {sensor_num_actual_str}, defaulting to all camera")
+        cam_in_use_actual = 3
+    
+    logger.info(f"Hardware configuration (fixed): {cam_in_use_actual} ({['', 'Left only', 'Right only', 'Dual cameras'][cam_in_use_actual]})")
 
-    # Initialize SDK connection
+    # Step 2: Initialize SDK connection
     logger.info("Initializing SDK connection...")
     initial_token = sdk_login()
     if not initial_token:
@@ -947,21 +1001,14 @@ def main():
     if not sdk_set_event_server_info(EVENT_SERVER_IP, EVENT_SERVER_PORT):
         logger.warning("Failed to set event server info in SDK, but continuing...")
 
-    # Connect to camera sockets
-    if cam_in_use == 1 or cam_in_use == 3:
+    # Step 3: 根据实际硬件配置初始化所有可用摄像头
+    if cam_in_use_actual == 1 or cam_in_use_actual == 3:  # 左摄像头可用 (actual=1 或 actual=3)
         cam1_info_address = ("localhost", CAMERA1_PORT)
         cam1_info_thread = Thread(target=connect_socket, args=(cam1_info_address, 'cam1_info_sock'))
         cam1_info_thread.daemon = True
         cam1_info_thread.start()
         
-    if cam_in_use == 2 or cam_in_use == 3:
-        cam2_info_address = ("localhost", CAMERA2_PORT)
-        cam2_info_thread = Thread(target=connect_socket, args=(cam2_info_address, 'cam2_info_sock'))
-        cam2_info_thread.daemon = True
-        cam2_info_thread.start()
-
-    # Open camera1 shared_memory
-    if cam_in_use == 1 or cam_in_use == 3:
+        # 初始化左摄像头共享内存
         shm_name = CAMERA1_SHM_BMP_NAME
         cam1_image_shm = open_shared_memory(shm_name)
         if cam1_image_shm is None:
@@ -973,7 +1020,15 @@ def main():
             cam1_image_shm.close_fd()
             return
         get_pic_from_socket(cam1_image_shm_ptr, CAM1_ID)
-    if cam_in_use == 2 or cam_in_use == 3:
+        logger.info("Camera1 initialized successfully")
+        
+    if cam_in_use_actual == 2 or cam_in_use_actual == 3:  # 右摄像头可用 (actual=2 或 actual=3)
+        cam2_info_address = ("localhost", CAMERA2_PORT)
+        cam2_info_thread = Thread(target=connect_socket, args=(cam2_info_address, 'cam2_info_sock'))
+        cam2_info_thread.daemon = True
+        cam2_info_thread.start()
+        
+        # 初始化右摄像头共享内存
         shm_name = CAMERA2_SHM_BMP_NAME
         cam2_image_shm = open_shared_memory(shm_name)
         if cam2_image_shm is None:
@@ -985,9 +1040,42 @@ def main():
             cam2_image_shm.close_fd()
             return
         get_pic_from_socket(cam2_image_shm_ptr, CAM2_ID)
+        logger.info("Camera2 initialized successfully")
 
+    # Step 4: 读取用户配置并验证
+    local_config = load_config("config.json")
+    sensor_num_config = local_config.get("cam_in_use", "dual")
+    
+    if sensor_num_config in ["1", "left"]:
+        requested_cam_in_use = 1
+    elif sensor_num_config in ["2", "right"]:
+        requested_cam_in_use = 2
+    elif sensor_num_config in ["3", "dual"]:
+        requested_cam_in_use = 3
+    else:
+        requested_cam_in_use = cam_in_use_actual  # 默认使用实际硬件配置
+
+    # 验证并设置cam_in_use
+    if validate_cam_in_use(requested_cam_in_use, cam_in_use_actual):
+        cam_in_use = requested_cam_in_use
+        profile_index = requested_cam_in_use
+        logger.info(f"Camera output mode set to: {cam_in_use}")
+    else:
+        # 不支持的配置，使用实际硬件配置
+        cam_in_use = cam_in_use_actual
+        profile_index = cam_in_use_actual
+        logger.warning(f"Requested config {requested_cam_in_use} not supported by hardware {cam_in_use_actual}. Using hardware config.")
+        
+        # 更新config.json
+        config_mapping = {1: "left", 2: "right", 3: "dual"}
+        local_config["cam_in_use"] = config_mapping[requested_cam_in_use]
+        with open("config.json", "w", encoding="utf-8") as file:
+            json.dump(local_config, file, indent=4)
+
+    # Step 5: 初始化图像
     update_sim_attribute(cam_in_use)
 
+    # Step 6: UART命令处理主循环
     while True:
         raw_data = uart.receive_serial()
         if raw_data:
@@ -1019,21 +1107,26 @@ def main():
                 uart.send_serial(response)
             elif string[:8] == "Profile|":
                 if string[8:] and int(string[8:]) in [1, 2, 3]:
-                    profile_index = int(string[8:])
+                    requested_profile = int(string[8:])
+                    
+                    # 验证请求的配置是否被硬件支持
+                    if validate_cam_in_use(requested_profile, cam_in_use_actual):
+                        profile_index = requested_profile
+                        cam_in_use = requested_profile
+                        
+                        # 更新config.json
+                        local_config = load_config("config.json")
+                        config_mapping = {1: "left", 2: "right", 3: "dual"}
+                        local_config["cam_in_use"] = config_mapping[requested_profile]
+                        with open("config.json", "w", encoding="utf-8") as file:
+                            json.dump(local_config, file, indent=4)
+                        
+                        logger.info(f"Profile changed to {requested_profile}")
+                    else:
+                        logger.warning(f"Profile {requested_profile} not supported by hardware {cam_in_use_actual}")
+                        
                 response = json.dumps({"CamProfile": int(profile_index)})
                 uart.send_serial(response)
-                if int(profile_index) != cam_in_use:
-                    cam_in_use = int(profile_index)
-                    # Update cam_in_use in config.json instead of CONFIG_PATH
-                    local_config = load_config("config.json")
-                    if int(profile_index) == 1:
-                        local_config["cam_in_use"] = "left"
-                    elif int(profile_index) == 2:
-                        local_config["cam_in_use"] = "right"
-                    elif int(profile_index) == 3:
-                        local_config["cam_in_use"] = "dual"
-                    with open("config.json", "w", encoding="utf-8") as file:
-                        json.dump(local_config, file, indent=4)
 
             elif string[:5] == "WiFi|":
                 if get_wifi_status() == 'enabled':
@@ -1086,7 +1179,6 @@ def main():
                     traffic_request_json = json.dumps(traffic_request)
                     send_data(cam_info_socket, traffic_request_json.encode('utf-8'))
                     response = receive_data(cam_info_socket, 4096)
-                    
                     if response:
                         try:
                             # 检查响应是否为有效的JSON
@@ -1107,7 +1199,6 @@ def main():
                     traffic_request_json = json.dumps(traffic_request)
                     send_data(cam_info_socket, traffic_request_json.encode('utf-8'))
                     response = receive_data(cam_info_socket, 4096)
-                    
                     if response:
                         try:
                             # 检查响应是否为有效的JSON
