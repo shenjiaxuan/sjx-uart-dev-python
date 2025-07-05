@@ -580,12 +580,86 @@ def process_cumulative_counting(current_data, camera_side):
     
     return period_data
 
+def create_uart_data_from_traffic_categories(traffic_data):
+    """
+    根据交通类别信息创建基础的uart_data
+    支持的类别默认值为0，不支持的类别为-1
+    """
+    # 从默认值开始（所有值都是-1，表示不支持）
+    uart_data = dnn_default_dirct.copy()
+    
+    # 获取line_categories列表
+    categories = traffic_data.get("categories", {})
+    line_categories = categories.get("line_categories", [])
+    
+    # 车辆类型映射
+    vehicle_mapping = {
+        'car': 'car',
+        'truck': 'truck', 
+        'bus': 'bus',
+        'pedestrian': 'ped',
+        'cycle': 'cycle'
+    }
+    
+    # 收集所有可能的类型（用于设置基础支持）
+    all_supported_types = set()
+    for category_str in line_categories:
+        categories_list = category_str.split("-")
+        for category in categories_list:
+            if category in vehicle_mapping:
+                all_supported_types.add(vehicle_mapping[category])
+    
+    # 根据支持的类别设置默认值为0
+    for mapped_type in all_supported_types:
+        uart_data[f"in{mapped_type}"] = 0
+        uart_data[f"in{mapped_type}spd"] = 0
+        uart_data[f"out{mapped_type}"] = 0
+        uart_data[f"out{mapped_type}spd"] = 0
+    
+    # 存储line_categories信息用于后续处理
+    create_uart_data_from_traffic_categories.line_categories = line_categories
+    create_uart_data_from_traffic_categories.vehicle_mapping = vehicle_mapping
+    
+    return uart_data
+
+def get_supported_types_for_boundary(boundary_name, line_categories, vehicle_mapping):
+    """
+    根据boundary名称推断其对应的line索引和支持的类型
+    boundary命名规则：boundary_<index>_<direction>
+    """
+    try:
+        # 从boundary名称中提取line索引
+        # 例如：boundary_1_in -> line_index = 0 (从1开始的索引转换为从0开始)
+        parts = boundary_name.split('_')
+        if len(parts) >= 2 and parts[1].isdigit():
+            line_index = int(parts[1]) - 1  # 转换为从0开始的索引
+            
+            if 0 <= line_index < len(line_categories):
+                supported_categories = line_categories[line_index].split("-")
+                supported_types = set()
+                for category in supported_categories:
+                    if category in vehicle_mapping:
+                        supported_types.add(vehicle_mapping[category])
+                return supported_types
+    except Exception as e:
+        logger.debug(f"Error parsing boundary name {boundary_name}: {e}")
+    
+    # 如果无法解析boundary名称，返回空集合（不支持任何类型）
+    return set()
+
 def reformat_counting_for_uart(counting_results, speed_averages, base_uart_data=None):
     """Reformat counting data for UART and integrate speed averages"""
     if base_uart_data is None:
         uart_data = dnn_default_dirct.copy()
     else:
         uart_data = base_uart_data.copy()
+    
+    # 获取line_categories信息
+    line_categories = getattr(create_uart_data_from_traffic_categories, 'line_categories', [])
+    vehicle_mapping = getattr(create_uart_data_from_traffic_categories, 'vehicle_mapping', {
+        'car': 'car', 'truck': 'truck', 'bus': 'bus', 'pedestrian': 'ped', 'cycle': 'cycle'
+    })
+    
     try:
         # Process single camera counting results
         for boundary, counts in counting_results.items():
@@ -598,33 +672,40 @@ def reformat_counting_for_uart(counting_results, speed_averages, base_uart_data=
                 # For boundaries like boundary_1, boundary_2, assume 'in' for now
                 direction = 'in'
             
-            # Map vehicle types to UART format
-            vehicle_mapping = {
-                'car': 'car',
-                'truck': 'truck', 
-                'bus': 'bus',
-                'pedestrian': 'ped',
-                'cycle': 'cycle'
-            }
+            # 获取当前boundary支持的类型
+            supported_types = get_supported_types_for_boundary(boundary, line_categories, vehicle_mapping)
+            
+            # 如果无法确定支持的类型，则处理所有类型（向后兼容）
+            if not supported_types:
+                logger.debug(f"Could not determine supported types for boundary {boundary}, processing all types")
+                supported_types = set(vehicle_mapping.values())
             
             for vehicle_type, count in counts.items():
                 if vehicle_type in vehicle_mapping:
-                    uart_key = direction + vehicle_mapping[vehicle_type]
+                    mapped_type = vehicle_mapping[vehicle_type]
+                    
+                    # 修复：只处理当前boundary支持的类型
+                    if mapped_type not in supported_types:
+                        logger.debug(f"Skipping unsupported type {mapped_type} for boundary {boundary}")
+                        continue
+                    
+                    uart_key = direction + mapped_type
                     speed_key = uart_key + "spd"
                     
                     if uart_key in uart_data and uart_data[uart_key] != -1:  # 只处理支持的类别
-                        uart_data[uart_key] = count  # Single camera data
+                        # 修复：累加计数而不是覆盖
+                        uart_data[uart_key] += count
                         
                         # Set speed based on count and averages
-                        direction_class = direction + vehicle_mapping[vehicle_type]
+                        direction_class = direction + mapped_type
                         if count > 0 and direction_class in speed_averages:
                             uart_data[speed_key] = int(round(speed_averages[direction_class]))
-                        elif count == 0:
+                        elif uart_data[uart_key] == 0:
                             uart_data[speed_key] = 0  # 计数为0时速度为0
                         else:
-                            # 如果有计数但没有速度数据，保持原有的速度值（可能是0或之前的值）
+                            # 如果有计数但没有速度数据，保持原有的速度值
                             if uart_data[speed_key] == -1:
-                                uart_data[speed_key] = 0  # 如果是不支持的类别，保持-1；否则设为0
+                                uart_data[speed_key] = 0
                         
     except Exception as e:
         logger.error(f"Error reformatting counting data: {e}")
@@ -895,41 +976,6 @@ def stop_event_server():
         event_server_socket.close()
         event_server_socket = None
         logger.info("Event server stopped")
-
-def create_uart_data_from_traffic_categories(traffic_data):
-    """
-    根据交通类别信息创建基础的uart_data
-    支持的类别默认值为0，不支持的类别为-1
-    """
-    # 从默认值开始（所有值都是-1，表示不支持）
-    uart_data = dnn_default_dirct.copy()
-    # 获取line_categories列表
-    categories = traffic_data.get("categories", {})
-    line_categories = categories.get("line_categories", [])
-    
-    # 车辆类型映射
-    vehicle_mapping = {
-        'car': 'car',
-        'truck': 'truck', 
-        'bus': 'bus',
-        'pedestrian': 'ped',
-        'cycle': 'cycle'
-    }
-    
-    # 根据支持的类别设置默认值为0
-    for category_str in line_categories:
-        # 每个category_str是通过"-"连接的多个类型，如"car-bus"
-        categories = category_str.split("-")
-        for category in categories:
-            if category in vehicle_mapping:
-                mapped_type = vehicle_mapping[category]
-                # 设置进入和离开方向的计数和速度
-                uart_data[f"in{mapped_type}"] = 0
-                uart_data[f"in{mapped_type}spd"] = 0
-                uart_data[f"out{mapped_type}"] = 0
-                uart_data[f"out{mapped_type}spd"] = 0
-    
-    return uart_data
 
 def validate_cam_in_use(requested_cam_in_use, actual_cam_in_use):
     """
