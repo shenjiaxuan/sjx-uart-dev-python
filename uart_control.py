@@ -804,8 +804,25 @@ def check_camera_errors(path):
 
 class UART:
     def __init__(self):
+        # 读取gs501.json配置文件来确定UART端口
+        try:
+            config = load_config(CONFIG_PATH)
+            hw_name = config.get("HWName", "")
+            
+            # 根据HWName决定使用哪个串口
+            if hw_name == "AS_8MP":
+                uart_port = "/dev/ttymxc3"
+            else:
+                uart_port = "/dev/ttymxc2"  # 默认端口
+            
+            logger.info(f"Using UART port {uart_port} for HWName: {hw_name}")
+            
+        except Exception as e:
+            logger.error(f"Failed to read HWName from config, using default port: {e}")
+            uart_port = "/dev/ttymxc2"
+        
         self.uartport = serial.Serial(
-                port="/dev/ttymxc2",
+                port=uart_port,
                 baudrate=38400,
                 bytesize=serial.EIGHTBITS,
                 parity=serial.PARITY_NONE,
