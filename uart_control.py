@@ -65,8 +65,7 @@ event_server_thread = None
 
 # SDK config
 SDK_SERVER_IP = '127.0.0.1'
-SDK_JSON_PORT = 880
-SDK_BINARY_PORT = 881
+SDK_JSON_PORT = 1880
 SDK_USER_NAME = "sdk_user"
 SDK_USER_PASSWD = "sdk_password"
 sdk_token = None
@@ -279,6 +278,36 @@ def sdk_set_event_server_info(server_ip, server_port):
     else:
         logger.error(f"Failed to set event server info: {response}")
         return False
+
+def sdk_get_camera_param(camera_id):
+    """从 SDK 获取摄像头参数"""
+    global sdk_token
+    
+    with sdk_token_lock:
+        current_token = sdk_token
+    
+    if not current_token:
+        current_token = sdk_login()
+        if not current_token:
+            return None
+    
+    # 根据 camera_id 确定使用的摄像头标识
+    if camera_id == CAM1_ID:
+        camera_name = "left"
+    elif camera_id == CAM2_ID:
+        camera_name = "right"
+    else:
+        logger.error(f"Invalid camera_id for SDK camera param: {camera_id}")
+        return None
+    
+    request = {"cmd": "get_camera_param_req", "camera_id": camera_name, "token": current_token}
+    response = send_json_request(request)
+    if response and response.get("cmd") == "get_camera_param_rsp" and response.get("ret_code") == 0:
+        logger.info(f"SDK camera param data: {response}")
+        return response
+    else:
+        logger.error(f"Failed to get camera param from SDK: {response}")
+        return None
 
 def calculate_speed_weighted_average(direction_class, new_speed, speed_averages, speed_counts):
     """
@@ -1332,30 +1361,36 @@ def main():
                         else:  # index == 2
                             cam_info_socket = 'cam2_info_sock'
                         
-                        current_time = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-                        gain = camera_control_process(cam_info_socket, GET_GAIN, 0)
-                        exposure = camera_control_process(cam_info_socket, GET_EXPOSURE, 0)
-                        ae_model = camera_control_process(cam_info_socket, GET_AE_MODE, 0)
-                        awb_model = camera_control_process(cam_info_socket, GET_AWB_MODE, 0)
-                        ae_status = "auto" if ae_model == 0 else "manual"
-                        awb_status = "enable" if awb_model == 0 else "disable"
-                        ps_data = {
-                            "CameraFPS": config["CameraFPS"],
-                            "ImageSize": f"{config['InputTensorWidth']}*{config['InputTensorHeith']}",
-                            "PixelDepth": config["PixelDepth"],
-                            "PixelOrder": config["PixelOrder"],
-                            "DNNModel": config["DNNModel"],
-                            "PostProcessingLogic": config["PostProcessingLogic"],
-                            "SendImageQuality": config["SendImageQuality"],
-                            "SendImageSizePercent": config["SendImageSizePercent"],
-                            "AEModel": ae_status,
-                            "Exposure": exposure,
-                            "Gain": gain,
-                            "AWBMode": awb_status,
-                            "Heating": config["Heating"],
-                            "Time": current_time
-                        }
-                        response = json.dumps(ps_data)
+                        # 使用SDK获取摄像头参数
+                        camera_id = CAM1_ID if index == 1 else CAM2_ID
+                        camera_param_response = sdk_get_camera_param(camera_id)
+                        if camera_param_response:
+                            gain = camera_param_response.get("gain", 0)
+                            exposure = camera_param_response.get("expose", 0)  # 注意：SDK返回的是expose
+                            ae_mode = camera_param_response.get("ae_mode", "auto")  # 字符串格式
+                            awb_mode = camera_param_response.get("awb_mode", "auto")  # 字符串格式
+                            framerate = camera_param_response.get("framerate", 30)  # 获取帧率
+                            gamma = camera_param_response.get("gamma", 0)  # 获取gamma值
+                            
+                            ps_data = {
+                                "CameraFPS": str(framerate),  # 使用SDK返回的帧率
+                                "ImageSize": f"{config['InputTensorWidth']}*{config['InputTensorHeith']}",
+                                "PixelDepth": config["PixelDepth"],
+                                "PixelOrder": config["PixelOrder"],
+                                "DNNModel": config["DNNModel"],
+                                "PostProcessingLogic": config["PostProcessingLogic"],
+                                "SendImageQuality": config["SendImageQuality"],
+                                "SendImageSizePercent": config["SendImageSizePercent"],
+                                "AEModel": ae_mode,  # 直接使用SDK返回的字符串
+                                "Exposure": str(exposure),
+                                "Gain": str(gain),
+                                "AWBMode": "enable" if awb_mode == "auto" else "disable",  # 根据auto/manual转换
+                                "Heating": config["Heating"],
+                                "Time": datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+                            }
+                            response = json.dumps(ps_data)
+                        else:
+                            response = json.dumps({}) # 如果SDK获取失败，发送空字典
                     else:
                         # 不符合条件时发送空字典
                         response = json.dumps({})
