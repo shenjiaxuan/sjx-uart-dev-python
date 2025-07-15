@@ -5,7 +5,6 @@ import time
 import math
 from PIL import Image
 import json
-import subprocess
 from datetime import datetime
 import numpy as np
 from pathlib import Path
@@ -18,6 +17,7 @@ import signal
 import sys
 import logging
 from logging.handlers import RotatingFileHandler
+import subprocess
 
 # ================================
 # CAMERA CONFIGURATION LOGIC
@@ -310,6 +310,66 @@ def sdk_get_camera_param(camera_id):
     else:
         logger.error(f"Failed to get camera param from SDK: {response}")
         return None
+
+def sdk_get_hardware_status():
+    """从SDK获取硬件状态"""
+    global sdk_token
+    
+    with sdk_token_lock:
+        current_token = sdk_token
+    
+    if not current_token:
+        current_token = sdk_login()
+        if not current_token:
+            return None
+    
+    request = {"cmd": "get_hardware_status_req", "token": current_token}
+    response = send_json_request(request)
+    if response and response.get("cmd") == "get_hardware_status_rsp" and response.get("ret_code") == 0:
+        return response
+    else:
+        logger.error(f"Failed to get hardware status from SDK: {response}")
+        return None
+
+def sdk_set_hardware_status(module, status):
+    """通过SDK设置硬件状态"""
+    global sdk_token
+    
+    with sdk_token_lock:
+        current_token = sdk_token
+    
+    if not current_token:
+        current_token = sdk_login()
+        if not current_token:
+            return False
+    
+    request = {
+        "cmd": "set_hardware_status_req", 
+        "token": current_token,
+        "module": module,
+        "status": status
+    }
+    response = send_json_request(request)
+    # sjx todo modify set_hardware_status_rsp
+    if response and response.get("cmd") == "set_hardware_status_req" and response.get("ret_code") == 0:
+        logger.info(f"Successfully set hardware status: {module}={status}")
+        return True
+    else:
+        logger.error(f"Failed to set hardware status: {response}")
+        return False
+
+def get_wifi_status_from_sdk():
+    """通过SDK获取WiFi状态"""
+    hardware_status = sdk_get_hardware_status()
+    if hardware_status:
+        wifi_status = hardware_status.get("wifi_status", "disabled")
+        return wifi_status
+    return None
+
+def set_wifi_status_via_sdk(enable):
+    """通过SDK设置WiFi状态"""
+    status = "open" if enable else "close"
+    return sdk_set_hardware_status("wifi", status)
 
 def calculate_speed_weighted_average(direction_class, new_speed, speed_averages, speed_counts):
     """
@@ -1173,6 +1233,18 @@ def main():
                 uart.send_serial(response)
 
             elif string[:5] == "WiFi|":
+                # 这段是对接sdk的wifi控制，暂时不使用，因为处理速度太慢
+                # wifi_cur_config = 0
+                # if get_wifi_status_from_sdk() == 'enabled':
+                #     wifi_cur_config = 1
+                # if string[5:] and int(string[5:]) in [0, 1]:
+                #     wifi_status = str(string[5:])
+                #     if wifi_cur_config != int(wifi_status):
+                #         if int(wifi_status) == 1:
+                #             set_wifi_status_via_sdk(True)
+                #         else:
+                #             set_wifi_status_via_sdk(False)
+                #这段是原来的wifi控制
                 if get_wifi_status() == 'enabled':
                     wifi_cur_config = 1
                 else:
