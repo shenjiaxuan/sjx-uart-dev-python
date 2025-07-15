@@ -14,11 +14,8 @@ import posix_ipc
 import os
 from threading import Thread
 import threading
-from socket_def import *
-import random
 import signal
 import sys
-
 import logging
 from logging.handlers import RotatingFileHandler
 
@@ -56,6 +53,11 @@ LOG_FOLDER = "log"
 CONFIG_PATH = '/home/root/AglaiaSense/resource/share_config/gs501.json'
 CAM1_ID = 1
 CAM2_ID = 2
+CAMERA1_PORT = 10808
+CAMERA2_PORT = 10809
+CAMERA1_SHM_BMP_NAME = "/left_imx501_bmp_shm"
+CAMERA2_SHM_BMP_NAME = "/right_imx501_bmp_shm"
+SHM_BMP_SIZE = 36936000
 
 # Event Server Configuration (for receiving speed data from SDK)
 EVENT_SERVER_IP = "127.0.0.1"
@@ -765,56 +767,6 @@ def get_pic_from_socket(shm_ptr, cam_id):
     tmp_image_path = Path(f'./tmp/tmp_{cam_id}.bmp').resolve()
     tmp_image_path.parent.mkdir(parents=True, exist_ok=True)
     image.save(tmp_image_path)
-
-
-
-def camera_control_process(socket_key, command, contol_val):
-    try:
-        if command == GET_GAIN:
-            gain_data_g = GainData(command)
-            send_data(socket_key, gain_data_g.to_bytes())
-            response = receive_data(socket_key, SOCK_COMM_LEN)
-            if response:
-                gain_data_g = GainData.from_bytes(response)
-            return gain_data_g.val
-
-        elif command == GET_EXPOSURE:
-            exposure_data_g = ExposureData(command)
-            send_data(socket_key, exposure_data_g.to_bytes())
-            response = receive_data(socket_key, SOCK_COMM_LEN)
-            if response:
-                exposure_data_g = ExposureData.from_bytes(response)
-            return exposure_data_g.val
-
-        elif command == GET_AE_MODE:
-            ae_mode_data_g = AeModeData(command)
-            send_data(socket_key, ae_mode_data_g.to_bytes())
-            response = receive_data(socket_key, SOCK_COMM_LEN)
-            if response:
-                ae_mode_data_g = AeModeData.from_bytes(response)
-            return ae_mode_data_g.val
-
-        elif command == GET_AWB_MODE:
-            awb_mode_data_g = AwbModeData(command)
-            send_data(socket_key, awb_mode_data_g.to_bytes())
-            response = receive_data(socket_key, SOCK_COMM_LEN)
-            if response:
-                awb_mode_data_g = AwbModeData.from_bytes(response)
-            return awb_mode_data_g.val
-        elif command == CAM_EN:
-            cam_en = CamEn(command, contol_val)
-            send_data(socket_key, cam_en.to_bytes())
-        elif command == ENERGENCY_MODE:
-            energency_mode = EnergencyMode(command, contol_val)
-            send_data(socket_key, energency_mode.to_bytes())
-        else:
-            logger.error(f"Camera command error: {hex(command)}")
-    except socket.timeout:
-        logger.error(f"Socket timed out waiting for response for command: {hex(command)}")
-    except socket.error as e:
-        logger.error(f"Socket error for command: {hex(command)}, error: {e}")
-    except Exception as e:
-        logger.error(f"Unexpected error for command: {hex(command)}, error: {e}")
 
 def load_config(path):
     with open(path, 'r') as file:
