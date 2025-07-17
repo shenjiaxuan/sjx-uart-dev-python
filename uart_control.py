@@ -350,8 +350,8 @@ def sdk_set_hardware_status(module, status):
         "status": status
     }
     response = send_json_request(request)
-    # sjx todo modify set_hardware_status_rsp
-    if response and response.get("cmd") == "set_hardware_status_req" and response.get("ret_code") == 0:
+
+    if response and response.get("cmd") == "set_hardware_status_rsp" and response.get("ret_code") == 0:
         logger.info(f"Successfully set hardware status: {module}={status}")
         return True
     else:
@@ -1390,11 +1390,9 @@ def main():
                         camera_param_response = sdk_get_camera_param(camera_id)
                         if camera_param_response:
                             gain = camera_param_response.get("gain", 0)
-                            exposure = camera_param_response.get("expose", 0)  # 注意：SDK返回的是expose
-                            ae_mode = camera_param_response.get("ae_mode", "auto")  # 字符串格式
-                            awb_mode = camera_param_response.get("awb_mode", "auto")  # 字符串格式
-                            framerate = camera_param_response.get("framerate", 30)  # 获取帧率
-                            gamma = camera_param_response.get("gamma", 0)  # 获取gamma值
+                            exposure = camera_param_response.get("exposure", 0)
+                            ae_mode = camera_param_response.get("ae_mode", "auto")
+                            framerate = camera_param_response.get("framerate", 30)
                             
                             ps_data = {
                                 "CameraFPS": str(framerate),  # 使用SDK返回的帧率
@@ -1408,7 +1406,6 @@ def main():
                                 "AEModel": ae_mode,  # 直接使用SDK返回的字符串
                                 "Exposure": str(exposure),
                                 "Gain": str(gain),
-                                "AWBMode": "enable" if awb_mode == "auto" else "disable",  # 根据auto/manual转换
                                 "Heating": config["Heating"],
                                 "Time": datetime.now().strftime("%d/%m/%Y %H:%M:%S")
                             }
