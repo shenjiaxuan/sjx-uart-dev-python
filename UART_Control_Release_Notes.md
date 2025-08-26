@@ -1,13 +1,14 @@
 # UART控制系统 Release Notes
 
-## 版本 3.0.3 - 2025年1月13日
+## 版本 3.0.3 - 2025年8月26日
 
 ### 主要更新
 - **WiFi控制API对接**: 完成WiFi状态管理与SDK中间件的API对接
   - 新增 `sdk_get_hardware_status()` 函数获取硬件状态
   - 新增 `sdk_set_hardware_status()` 函数设置硬件状态
   - 新增 `get_wifi_status_from_sdk()` 和 `set_wifi_status_via_sdk()` 函数
-  - WiFi控制命令支持通过SDK进行状态管理（当前版本中暂时禁用以提高响应速度）
+  - WiFi控制命令支持通过SDK进行状态管理
+  - **启用WiFi的SDK控制功能**，提供更稳定的WiFi状态管理
 - **Camera Settings API对接**: 摄像头参数获取完全对接SDK API
   - 新增 `sdk_get_camera_param()` 函数获取摄像头参数
   - PS1/PS2命令现在通过SDK获取实时摄像头参数（增益、曝光、AE模式、帧率、gamma等）
@@ -16,6 +17,10 @@
   - 移除过时的webserver socket通信相关代码
   - 清理无效的文件和冗余代码
   - 优化代码结构，提高系统稳定性
+- **Cython打包功能**: 新增Cython编译打包支持
+  - 支持将Python代码编译为二进制文件，提高代码执行效率
+  - 增强代码安全性，保护源代码不被直接查看
+  - 优化系统启动速度和运行性能
 
 ### 技术改进
 - **SDK集成增强**: 完善SDK中间件集成，支持更多硬件控制功能

@@ -20,6 +20,11 @@ from logging.handlers import RotatingFileHandler
 import subprocess
 
 # ================================
+# VERSION INFORMATION
+# ================================
+VERSION = "3.0.3"
+
+# ================================
 # CAMERA CONFIGURATION LOGIC
 # ================================
 # cam_in_use_actual: 实际硬件配置，从gs501.json读取，程序运行期间不变
@@ -311,7 +316,7 @@ def sdk_get_camera_param(camera_id):
         logger.error(f"Failed to get camera param from SDK: {response}")
         return None
 
-def sdk_get_hardware_status():
+def sdk_get_hardware_status(modules=None):
     """从SDK获取硬件状态"""
     global sdk_token
     
@@ -324,6 +329,8 @@ def sdk_get_hardware_status():
             return None
     
     request = {"cmd": "get_hardware_status_req", "token": current_token}
+    if modules:
+        request["modules"] = modules
     response = send_json_request(request)
     if response and response.get("cmd") == "get_hardware_status_rsp" and response.get("ret_code") == 0:
         return response
@@ -360,7 +367,8 @@ def sdk_set_hardware_status(module, status):
 
 def get_wifi_status_from_sdk():
     """通过SDK获取WiFi状态"""
-    hardware_status = sdk_get_hardware_status()
+    modules = ["wifi"]
+    hardware_status = sdk_get_hardware_status(modules)
     if hardware_status:
         wifi_status = hardware_status.get("wifi_status", "disabled")
         return wifi_status
@@ -1063,6 +1071,11 @@ def main():
     global cam1_image_shm_ptr, cam2_image_shm_ptr
     global emer_imgage_send
 
+    # 打印当前版本
+    logger.info("===========================================")
+    logger.info(f"UART Control Service Version: {VERSION}")
+    logger.info("===========================================")
+
     uart = UART()
     
     # Step 1: Read actual hardware configuration from gs501.json
@@ -1233,29 +1246,29 @@ def main():
                 uart.send_serial(response)
 
             elif string[:5] == "WiFi|":
-                # 这段是对接sdk的wifi控制，暂时不使用，因为处理速度太慢
-                # wifi_cur_config = 0
-                # if get_wifi_status_from_sdk() == 'enabled':
+                #这段是原来的wifi控制
+                # if get_wifi_status() == 'enabled':
                 #     wifi_cur_config = 1
+                # else:
+                #     wifi_cur_config = 0
                 # if string[5:] and int(string[5:]) in [0, 1]:
                 #     wifi_status = str(string[5:])
                 #     if wifi_cur_config != int(wifi_status):
                 #         if int(wifi_status) == 1:
-                #             set_wifi_status_via_sdk(True)
+                #             subprocess.run(['nmcli', 'radio', 'wifi', 'on'])
                 #         else:
-                #             set_wifi_status_via_sdk(False)
-                #这段是原来的wifi控制
-                if get_wifi_status() == 'enabled':
+                #             subprocess.run(['nmcli', 'radio', 'wifi', 'off'])
+                # 这段是对接sdk的wifi控制，暂时不使用，因为处理速度太慢
+                wifi_cur_config = 0
+                if get_wifi_status_from_sdk() == 'enabled':
                     wifi_cur_config = 1
-                else:
-                    wifi_cur_config = 0
                 if string[5:] and int(string[5:]) in [0, 1]:
                     wifi_status = str(string[5:])
                     if wifi_cur_config != int(wifi_status):
                         if int(wifi_status) == 1:
-                            subprocess.run(['nmcli', 'radio', 'wifi', 'on'])
+                            set_wifi_status_via_sdk(True)
                         else:
-                            subprocess.run(['nmcli', 'radio', 'wifi', 'off'])
+                            set_wifi_status_via_sdk(False)
                 else:
                     wifi_status = wifi_cur_config
                 response = json.dumps({"WiFiEnable": int(wifi_status)})
