@@ -936,6 +936,9 @@ def update_sim_attribute(cam_in_use):
     str_image = []
     for x in range(send_time):
         str_image.append(converted_string[x * send_max_length:(x + 1) * send_max_length])
+    
+    # 打印图像块数信息
+    logger.info(f"Image saved and split into {len(str_image)} blocks (total size: {str_len} bytes, block size: {send_max_length} bytes)")
 
 def handle_sdk_client_connection(client_socket, client_address):
     """处理来自SDK的单个客户端连接"""
@@ -1459,22 +1462,32 @@ def main():
                         # 不符合条件时发送空字典
                         response = json.dumps({})
                     uart.send_serial(response)
-                elif (index - 5) < len(str_image):
-                    if index == 5 and emer_mode == 1:
-                        emer_imgage_send = 1
-                    response = "{\"Block" + str(index - 4) + "\":\"" + str_image[index - 5] + "\"}"
-                    uart.send_serial(response)
-                    if index == 24 and emer_imgage_send == 1:
-                        emer_imgage_send = 0
-                        emer_mode = 0
-                elif index < 25:
-                    response = "{\"Block" + str(index - 4) + "\":\"" + "\"}"
-                    uart.send_serial(response)
-                    if index == 24 and emer_imgage_send == 1:
-                        emer_imgage_send = 0
-                        emer_mode = 0
+                elif index >= 5 and index < 25:  # 从index=5开始处理图像块，到index=24结束
+                    block_index = index - 5  # 计算实际的数组索引
+                    
+                    if block_index < len(str_image):
+                        # 发送实际存在的图像块
+                        if block_index == 0 and emer_mode == 1:
+                            emer_imgage_send = 1
+                        response = "{\"Block" + str(block_index + 1) + "\":\"" + str_image[block_index] + "\"}"
+                        uart.send_serial(response)
+                        
+                        # 检查是否发送完最后一块
+                        if block_index == len(str_image) - 1 and emer_imgage_send == 1:
+                            emer_imgage_send = 0
+                            emer_mode = 0
+                            logger.debug(f"Emergency mode image sending completed at block {block_index + 1}")
+                    else:
+                        # 超出实际图像块范围但小于25，返回空包
+                        response = "{\"Block" + str(block_index + 1) + "\":\"\"}"
+                        uart.send_serial(response)
+                        # 如果在紧急模式下到达index=24，结束紧急模式
+                        if index == 24 and emer_imgage_send == 1:
+                            emer_imgage_send = 0
+                            emer_mode = 0
+                            logger.debug(f"Emergency mode ended at index 24, actual blocks: {len(str_image)}")
                 else:
-                    logger.error(f"out of Block -> ?PS{index}")
+                    logger.error(f"Unexpected PS index: ?PS{index}")
 
             logger.debug(f"--- {time.time() - start_time} seconds ---")
 
