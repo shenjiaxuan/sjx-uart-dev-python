@@ -13,7 +13,7 @@ class UART:
     def __init__(self):
         self.uartport = serial.Serial(
                 port="COM3",
-                baudrate=38400,
+                baudrate=38400, # 115200
                 bytesize=serial.EIGHTBITS,
                 parity=serial.PARITY_NONE,
                 stopbits=serial.STOPBITS_ONE,
@@ -85,11 +85,12 @@ if __name__ == '__main__':
         "@|600",
         "@|",
         "?Order",
+        # "Profile|3",
         "Profile|",
         "WiFi|1",
         "WiFi|",
         "?ERR",
-        "REACT|1",
+        # "REACT|1",
         "REACT|",
         "?OBdata",
         "?PS1",
