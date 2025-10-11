@@ -18,11 +18,13 @@ import sys
 import logging
 from logging.handlers import RotatingFileHandler
 import subprocess
+import hashlib
+import zlib
 
 # ================================
 # VERSION INFORMATION
 # ================================
-VERSION = "3.0.3"
+VERSION = "3.1.0"  # Added file transfer support
 
 # ================================
 # CAMERA CONFIGURATION LOGIC
@@ -121,6 +123,18 @@ speed_averages_right = {}
 speed_counts_left = {}  # {direction_class: count}
 speed_counts_right = {}
 speed_data_lock = threading.Lock()
+
+# File transfer globals
+FILE_RECV_BLOCK_SIZE = 650  # Bytes per block (before Base64 encoding, ensures JSON < 1000 bytes)
+file_recv_state = {
+    "active": False,
+    "filename": "",
+    "total_blocks": 0,
+    "received_blocks": set(),
+    "expected_md5": "",
+    "temp_file": None,
+    "temp_path": ""
+}
 
 def setup_logger():
     log_folder_path = Path(LOG_FOLDER)
@@ -1049,20 +1063,368 @@ def stop_event_server():
 def validate_cam_in_use(requested_cam_in_use, actual_cam_in_use):
     """
     验证请求的相机配置是否被实际硬件支持
-    
+
     Args:
         requested_cam_in_use (int): 请求的相机配置 (1=左, 2=右, 3=双摄)
         actual_cam_in_use (int): 实际硬件配置 (1=仅左, 2=仅右, 3=双摄)
-    
+
     Returns:
         bool: True if supported, False otherwise
     """
     # 双摄硬件支持所有配置
     if actual_cam_in_use == 3:
         return requested_cam_in_use in [1, 2, 3]
-    
+
     # 单摄硬件只支持对应的配置
     return requested_cam_in_use == actual_cam_in_use
+
+# ================================
+# FILE TRANSFER FUNCTIONS
+# ================================
+
+def handle_json_command(uart, cmd):
+    """Handle JSON format commands for file transfer"""
+    global file_recv_state
+
+    cmd_type = cmd.get("cmd")
+
+    if cmd_type == "file_start":
+        handle_file_start(uart, cmd)
+    elif cmd_type == "file_block":
+        handle_file_block(uart, cmd)
+    elif cmd_type == "file_end":
+        handle_file_end(uart)
+    elif cmd_type == "file_cancel":
+        handle_file_cancel(uart)
+    else:
+        logger.warning(f"Unknown JSON command: {cmd_type}")
+
+def handle_file_start(uart, cmd):
+    """Handle file transfer start command"""
+    global file_recv_state
+
+    try:
+        # Check if there's already an active transfer
+        if file_recv_state["active"]:
+            response = {
+                "cmd": "file_start",
+                "status": "error",
+                "reason": "transfer_in_progress"
+            }
+            uart.send_serial(json.dumps(response))
+            return
+
+        # Extract parameters
+        filename = cmd.get("name", "unnamed_file")
+        total_blocks = cmd.get("blocks", 0)
+        expected_md5 = cmd.get("md5", "")
+        file_size = cmd.get("size", 0)
+
+        # Check disk space
+        temp_dir = "./tmp"
+        try:
+            # Create temp directory if not exists
+            Path(temp_dir).mkdir(parents=True, exist_ok=True)
+
+            stat = os.statvfs(temp_dir)
+            free_space = stat.f_bavail * stat.f_frsize
+            if free_space < file_size * 1.2:  # Need 1.2x space for safety
+                response = {
+                    "cmd": "file_start",
+                    "status": "error",
+                    "reason": "disk_full"
+                }
+                uart.send_serial(json.dumps(response))
+                return
+        except Exception as e:
+            logger.warning(f"Could not check disk space: {e}")
+
+        # Create temporary file (use fixed name for single session)
+        temp_path = f"{temp_dir}/file_recv_current.tmp"
+        temp_file = open(temp_path, "wb")
+
+        # Initialize state
+        file_recv_state = {
+            "active": True,
+            "filename": filename,
+            "total_blocks": total_blocks,
+            "received_blocks": set(),
+            "expected_md5": expected_md5,
+            "temp_file": temp_file,
+            "temp_path": temp_path
+        }
+
+        # Return success response
+        response = {
+            "cmd": "file_start",
+            "status": "ready"
+        }
+        uart.send_serial(json.dumps(response))
+        logger.info(f"File transfer started: {filename}, {total_blocks} blocks")
+
+    except Exception as e:
+        logger.error(f"Error in file_start: {e}")
+        response = {
+            "cmd": "file_start",
+            "status": "error",
+            "reason": str(e)
+        }
+        uart.send_serial(json.dumps(response))
+
+def handle_file_block(uart, cmd):
+    """Handle file data block with CRC32 verification"""
+    global file_recv_state
+
+    try:
+        if not file_recv_state["active"]:
+            response = {
+                "cmd": "file_block",
+                "status": "error",
+                "reason": "no_active_transfer"
+            }
+            uart.send_serial(json.dumps(response))
+            return
+
+        block_index = cmd.get("index", -1)
+        expected_crc = cmd.get("crc32", "")
+        base64_data = cmd.get("data", "")
+
+        # Base64 decode
+        try:
+            binary_data = base64.b64decode(base64_data)
+        except Exception as e:
+            logger.error(f"Base64 decode error at block {block_index}: {e}")
+            response = {
+                "cmd": "file_block",
+                "index": block_index,
+                "status": "error",
+                "reason": "invalid_base64",
+                "retry": True
+            }
+            uart.send_serial(json.dumps(response))
+            return
+
+        # Calculate CRC32
+        actual_crc = format(zlib.crc32(binary_data) & 0xffffffff, '08x')
+
+        # Verify CRC32
+        if actual_crc != expected_crc:
+            logger.warning(f"CRC mismatch at block {block_index}: expected {expected_crc}, got {actual_crc}")
+            response = {
+                "cmd": "file_block",
+                "index": block_index,
+                "status": "error",
+                "reason": "crc_mismatch",
+                "retry": True
+            }
+            uart.send_serial(json.dumps(response))
+            return
+
+        # Verify block order (must be sequential)
+        expected_index = len(file_recv_state["received_blocks"])
+
+        if block_index < expected_index:
+            # Duplicate block (already received)
+            logger.warning(f"Duplicate block {block_index}, already received (expected {expected_index})")
+            response = {
+                "cmd": "file_block",
+                "index": block_index,
+                "status": "ok"  # Return ok to avoid sender retrying
+            }
+            uart.send_serial(json.dumps(response))
+            return
+
+        if block_index > expected_index:
+            # Missing blocks detected
+            logger.error(f"Block order error: received {block_index}, expected {expected_index} (missing blocks!)")
+            response = {
+                "cmd": "file_block",
+                "index": block_index,
+                "status": "error",
+                "reason": "out_of_order",
+                "expected": expected_index,
+                "retry": False  # Protocol error, should not retry
+            }
+            uart.send_serial(json.dumps(response))
+            return
+
+        # Write to file sequentially (no seek needed)
+        temp_file = file_recv_state["temp_file"]
+        bytes_written = temp_file.write(binary_data)
+        temp_file.flush()
+
+        # Verify write was successful
+        if bytes_written != len(binary_data):
+            logger.error(f"Write error at block {block_index}: wrote {bytes_written}, expected {len(binary_data)}")
+            response = {
+                "cmd": "file_block",
+                "index": block_index,
+                "status": "error",
+                "reason": "write_failed",
+                "retry": False
+            }
+            uart.send_serial(json.dumps(response))
+            return
+
+        # Record received block
+        file_recv_state["received_blocks"].add(block_index)
+
+        # Return success
+        response = {
+            "cmd": "file_block",
+            "index": block_index,
+            "status": "ok"
+        }
+        uart.send_serial(json.dumps(response))
+
+        # Log progress every 50 blocks
+        if block_index % 50 == 0 or block_index == file_recv_state["total_blocks"] - 1:
+            progress = len(file_recv_state["received_blocks"])
+            total = file_recv_state["total_blocks"]
+            percent = progress * 100.0 / total if total > 0 else 0
+            logger.info(f"File transfer progress: {progress}/{total} ({percent:.1f}%)")
+
+    except Exception as e:
+        logger.error(f"Error in file_block: {e}")
+        response = {
+            "cmd": "file_block",
+            "index": block_index,
+            "status": "error",
+            "reason": str(e),
+            "retry": False
+        }
+        uart.send_serial(json.dumps(response))
+
+def handle_file_end(uart):
+    """Handle file transfer end and verify MD5"""
+    global file_recv_state
+
+    try:
+        if not file_recv_state["active"]:
+            response = {
+                "cmd": "file_end",
+                "status": "error",
+                "reason": "no_active_transfer"
+            }
+            uart.send_serial(json.dumps(response))
+            return
+
+        # Close temporary file
+        temp_file = file_recv_state["temp_file"]
+        temp_file.close()
+
+        # Verify file size and block count
+        temp_file_size = os.path.getsize(file_recv_state["temp_path"])
+        received_block_count = len(file_recv_state["received_blocks"])
+        expected_block_count = file_recv_state["total_blocks"]
+
+        logger.info(f"Transfer statistics:")
+        logger.info(f"  Received blocks: {received_block_count}/{expected_block_count}")
+        logger.info(f"  File size: {temp_file_size} bytes")
+
+        # Check for missing blocks
+        if received_block_count != expected_block_count:
+            missing_blocks = set(range(expected_block_count)) - file_recv_state["received_blocks"]
+            logger.error(f"Missing {len(missing_blocks)} blocks: {sorted(list(missing_blocks))[:10]}...")
+            response = {
+                "cmd": "file_end",
+                "status": "error",
+                "reason": "incomplete_transfer",
+                "received": received_block_count,
+                "expected": expected_block_count
+            }
+            uart.send_serial(json.dumps(response))
+            # Clean up temporary file
+            try:
+                os.remove(file_recv_state["temp_path"])
+            except:
+                pass
+            file_recv_state["active"] = False
+            return
+
+        # Calculate MD5
+        logger.info(f"Calculating MD5 for {temp_file_size} bytes...")
+        with open(file_recv_state["temp_path"], "rb") as f:
+            actual_md5 = hashlib.md5(f.read()).hexdigest()
+
+        expected_md5 = file_recv_state["expected_md5"]
+        logger.info(f"MD5 comparison:")
+        logger.info(f"  Expected: {expected_md5}")
+        logger.info(f"  Actual:   {actual_md5}")
+
+        # Verify MD5
+        if actual_md5 != expected_md5:
+            logger.error(f"MD5 mismatch: expected {expected_md5}, got {actual_md5}")
+            response = {
+                "cmd": "file_end",
+                "status": "error",
+                "reason": "md5_mismatch",
+                "expected": expected_md5,
+                "actual": actual_md5
+            }
+            uart.send_serial(json.dumps(response))
+            # Clean up temporary file
+            try:
+                os.remove(file_recv_state["temp_path"])
+            except:
+                pass
+            file_recv_state["active"] = False
+            return
+
+        # Move to final location
+        final_path = f"./tmp/{file_recv_state['filename']}"
+        # Remove old file if exists
+        if os.path.exists(final_path):
+            os.remove(final_path)
+        os.rename(file_recv_state["temp_path"], final_path)
+        file_size = os.path.getsize(final_path)
+
+        # Return success
+        response = {
+            "cmd": "file_end",
+            "status": "success",
+            "md5": actual_md5,
+            "path": final_path,
+            "size": file_size
+        }
+        uart.send_serial(json.dumps(response))
+        logger.info(f"File transfer completed successfully: {final_path} ({file_size} bytes, MD5: {actual_md5})")
+
+        # Reset state
+        file_recv_state["active"] = False
+
+    except Exception as e:
+        logger.error(f"Error in file_end: {e}")
+        response = {
+            "cmd": "file_end",
+            "status": "error",
+            "reason": str(e)
+        }
+        uart.send_serial(json.dumps(response))
+        file_recv_state["active"] = False
+
+def handle_file_cancel(uart):
+    """Cancel file transfer and clean up"""
+    global file_recv_state
+
+    if file_recv_state["active"]:
+        # Close and delete temporary file
+        try:
+            if file_recv_state["temp_file"]:
+                file_recv_state["temp_file"].close()
+            if os.path.exists(file_recv_state["temp_path"]):
+                os.remove(file_recv_state["temp_path"])
+        except Exception as e:
+            logger.error(f"Error cleaning up: {e}")
+
+        file_recv_state["active"] = False
+        logger.info("File transfer cancelled")
+
+    response = {
+        "cmd": "file_cancel",
+        "status": "cancelled"
+    }
+    uart.send_serial(json.dumps(response))
 
 def main():
     """
@@ -1202,6 +1564,19 @@ def main():
             start_time = time.time()
             string = raw_data.decode("utf_8", "ignore").rstrip()
             logger.debug(f"UART recv <-: {string}")
+
+            # Try to parse as JSON command (for file transfer)
+            try:
+                json_cmd = json.loads(string)
+                if isinstance(json_cmd, dict) and "cmd" in json_cmd:
+                    # Handle JSON format command
+                    handle_json_command(uart, json_cmd)
+                    logger.debug(f"--- {time.time() - start_time} seconds ---")
+                    continue
+            except json.JSONDecodeError:
+                pass  # Not JSON, continue with original command parsing
+
+            # Original command handling
             if string == "?Asset":
                 # Set AppNumber based on emergency mode status
                 app_number = APP_NUMBER_EMERGENCY if emer_mode == 1 else APP_NUMBER_TRAFFIC
