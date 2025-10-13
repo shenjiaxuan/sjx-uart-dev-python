@@ -209,36 +209,29 @@ def sdk_login():
     request = {"cmd": "user_login_req", "username": SDK_USER_NAME, "passwd": SDK_USER_PASSWD}
     response = send_json_request(request)
     if response and response.get("cmd") == "user_login_rsp" and response.get("ret_code") == 0:
-        with sdk_token_lock:
-            sdk_token = response.get("token")
+        sdk_token = response.get("token")
         logger.info("SDK login successful")
         return sdk_token
     else:
         logger.error(f"SDK login failed: {response}")
+        sdk_token = None
         return None
 
 def sdk_logout():
     """SDK 登出"""
     global sdk_token
-    with sdk_token_lock:
-        if sdk_token:
-            request = {"cmd": "user_logout_req", "token": sdk_token}
-            response = send_json_request(request)
-            logger.info(f"SDK logout response: {response}")
-            sdk_token = None
+    if sdk_token:
+        request = {"cmd": "user_logout_req", "token": sdk_token}
+        response = send_json_request(request)
+        logger.info(f"SDK logout response: {response}")
+        sdk_token = None
 
 def sdk_get_counting_data(camera_id):
-    """从 SDK 获取计数数据"""
-    global sdk_token
-    
-    with sdk_token_lock:
-        current_token = sdk_token
-    
-    if not current_token:
-        current_token = sdk_login()
-        if not current_token:
-            return None
-    
+    """从 SDK 获取计数数据（不负责token管理，由心跳线程维护）"""
+    if not sdk_token:
+        logger.warning("No valid token available for get_counting_data")
+        return None
+
     # 根据 camera_id 确定使用的摄像头标识
     if camera_id == CAM1_ID:
         camera_name = "left"
@@ -247,8 +240,8 @@ def sdk_get_counting_data(camera_id):
     else:
         logger.error(f"Invalid camera_id for SDK counting: {camera_id}")
         return None
-    
-    request = {"cmd": "get_dnn_counting_req", "camera_id": camera_name, "token": current_token}
+
+    request = {"cmd": "get_dnn_counting_req", "camera_id": camera_name, "token": sdk_token}
     response = send_json_request(request)
     logger.info(f"-----------SDK counting data: {response}")
     return response
@@ -257,47 +250,49 @@ def sdk_heartbeat():
     """发送心跳保持连接"""
     global sdk_token
     
-    with sdk_token_lock:
-        current_token = sdk_token
-    
-    if current_token:
-        request = {"cmd": "heartbeat_req", "token": current_token}
+    if sdk_token:
+        request = {"cmd": "heartbeat_req", "token": sdk_token}
         response = send_json_request(request)
         if response and response.get("ret_code") != 0:
-            logger.warning("SDK heartbeat failed, may need to re-login")
-            return False
+            logger.warning("SDK heartbeat failed, need to re-login")
+            # 心跳失败，尝试重新登录
+            if sdk_login():  # sdk_login() 会直接设置全局 sdk_token
+                logger.info("SDK re-login successful after heartbeat failure")
+                return True
+            else:
+                logger.error("SDK re-login failed after heartbeat failure")
+                return False
         return True
-    return False
+    else:
+        # Token不存在，尝试登录
+        if sdk_login():  # sdk_login() 会直接设置全局 sdk_token
+            logger.info("SDK login successful in heartbeat")
+            return True
+        return False
 
 def sdk_heartbeat_thread():
     """心跳线程，定期发送心跳"""
     while True:
         try:
             sdk_heartbeat()
-            time.sleep(60)  # 每60秒发送一次心跳
+            time.sleep(30)  # 每30秒发送一次心跳
         except Exception as e:
             logger.error(f"SDK heartbeat thread error: {e}")
-            time.sleep(60)
+            time.sleep(30)
 
 def sdk_set_event_server_info(server_ip, server_port):
-    """设置事件服务器信息"""
-    global sdk_token
-    
-    with sdk_token_lock:
-        current_token = sdk_token
-    
-    if not current_token:
-        current_token = sdk_login()
-        if not current_token:
-            return False
-    
+    """设置事件服务器信息（不负责token管理，由心跳线程维护）"""
+    if not sdk_token:
+        logger.warning("No valid token available for set_event_server_info")
+        return False
+
     request = {
         "cmd": "set_event_server_info_req",
-        "token": current_token,
+        "token": sdk_token,
         "server_ip": server_ip,
         "server_port": server_port
     }
-    
+
     response = send_json_request(request)
     if response and response.get("cmd") == "set_event_server_info_rsp" and response.get("ret_code") == 0:
         logger.info(f"Successfully set event server info: {server_ip}:{server_port}")
@@ -307,17 +302,11 @@ def sdk_set_event_server_info(server_ip, server_port):
         return False
 
 def sdk_get_camera_param(camera_id):
-    """从 SDK 获取摄像头参数"""
-    global sdk_token
-    
-    with sdk_token_lock:
-        current_token = sdk_token
-    
-    if not current_token:
-        current_token = sdk_login()
-        if not current_token:
-            return None
-    
+    """从 SDK 获取摄像头参数（不负责token管理，由心跳线程维护）"""
+    if not sdk_token:
+        logger.warning("No valid token available for get_camera_param")
+        return None
+
     # 根据 camera_id 确定使用的摄像头标识
     if camera_id == CAM1_ID:
         camera_name = "left"
@@ -326,8 +315,8 @@ def sdk_get_camera_param(camera_id):
     else:
         logger.error(f"Invalid camera_id for SDK camera param: {camera_id}")
         return None
-    
-    request = {"cmd": "get_camera_param_req", "camera_id": camera_name, "token": current_token}
+
+    request = {"cmd": "get_camera_param_req", "camera_id": camera_name, "token": sdk_token}
     response = send_json_request(request)
     if response and response.get("cmd") == "get_camera_param_rsp" and response.get("ret_code") == 0:
         logger.info(f"SDK camera param data: {response}")
@@ -337,18 +326,12 @@ def sdk_get_camera_param(camera_id):
         return None
 
 def sdk_get_hardware_status(modules=None):
-    """从SDK获取硬件状态"""
-    global sdk_token
-    
-    with sdk_token_lock:
-        current_token = sdk_token
-    
-    if not current_token:
-        current_token = sdk_login()
-        if not current_token:
-            return None
-    
-    request = {"cmd": "get_hardware_status_req", "token": current_token}
+    """从SDK获取硬件状态（不负责token管理，由心跳线程维护）"""
+    if not sdk_token:
+        logger.warning("No valid token available for get_hardware_status")
+        return None
+
+    request = {"cmd": "get_hardware_status_req", "token": sdk_token}
     if modules:
         request["modules"] = modules
     response = send_json_request(request)
@@ -359,20 +342,14 @@ def sdk_get_hardware_status(modules=None):
         return None
 
 def sdk_set_hardware_status(module, status):
-    """通过SDK设置硬件状态"""
-    global sdk_token
-    
-    with sdk_token_lock:
-        current_token = sdk_token
-    
-    if not current_token:
-        current_token = sdk_login()
-        if not current_token:
-            return False
-    
+    """通过SDK设置硬件状态（不负责token管理，由心跳线程维护）"""
+    if not sdk_token:
+        logger.warning("No valid token available for set_hardware_status")
+        return False
+
     request = {
-        "cmd": "set_hardware_status_req", 
-        "token": current_token,
+        "cmd": "set_hardware_status_req",
+        "token": sdk_token,
         "module": module,
         "status": status
     }
