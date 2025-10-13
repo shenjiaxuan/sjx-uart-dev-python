@@ -20,6 +20,7 @@ from logging.handlers import RotatingFileHandler
 import subprocess
 import hashlib
 import zlib
+import shutil
 
 # ================================
 # VERSION INFORMATION
@@ -79,6 +80,11 @@ SDK_USER_NAME = "sdk_user"
 SDK_USER_PASSWD = "sdk_password"
 sdk_token = None
 sdk_token_lock = threading.Lock()
+
+# Firmware update config
+UNIT_CONFIG_PATH = '/home/root/AglaiaSense/resource/share_config/gs501.json'
+HOST_DEVM_UPDATE = 'localhost'
+PORT_DEVM_UPDATE = 20808
 
 # define pic size
 IMAGE_CHANNELS = 3
@@ -1082,6 +1088,95 @@ def validate_cam_in_use(requested_cam_in_use, actual_cam_in_use):
 # FILE TRANSFER FUNCTIONS
 # ================================
 
+# Calculate the md5 value of the file
+def calculate_md5(filename, block_size=4096):
+    md5 = hashlib.md5()
+    with open(filename, 'rb') as f:
+        for block in iter(lambda: f.read(block_size), b''):
+            md5.update(block)
+    return md5.hexdigest()
+
+def has_zip_file(directory_path):
+        """Check if there are any ZIP files in the specified directory."""
+        try:
+            # Validate if the given path is a directory
+            if not os.path.isdir(directory_path):
+                logger.info(f"The provided path '{directory_path}' is not a directory.\n")
+                return False
+
+            # List all files in the directory and check for .zip files
+            for item in os.listdir(directory_path):
+                if item.lower().endswith('.zip'):
+                    logger.error(f"Found ZIP file: {item}\n")
+                    return True
+
+            logger.info("No ZIP files found in the directory.\n")
+            return False
+
+        except Exception as e:
+            logger.error(f"An error occurred while checking for ZIP files: {e}\n")
+            return False
+
+def copy_and_verify(src_path, dest_path, src_md5):
+    """拷贝文件并验证MD5,成功则删除原文件"""
+    src_path = Path(src_path)
+    dest_path = Path(dest_path)
+
+    # 检查源文件是否存在
+    if not src_path.exists():
+        raise FileNotFoundError(f"Source file {src_path} does not exist.")
+
+    # 拷贝文件
+    try:
+        shutil.copy2(src_path, dest_path)
+        logger.info(f"File copied from {src_path} to {dest_path}")
+    except Exception as e:
+        raise Exception(f"Error copying file: {e}")
+
+    # 校验MD5
+    dest_md5 = calculate_md5(dest_path)
+
+    if src_md5 == dest_md5:
+        logger.info(f"MD5 match: Copy verified successfully.")
+        # 删除源文件
+        try:
+            # 创建文件并写入 dest_path 的 MD5 值
+            md5_file_path = dest_path.with_suffix('.md5')  # 使用与目标文件相同的名称，但扩展名为 .md5
+            with open(md5_file_path, 'w') as md5_file:
+                md5_file.write(f"{dest_md5}\n")  # 写入 MD5 值
+                logger.info(f"MD5 value written to {md5_file_path}")
+
+            src_path.unlink()
+            logger.info(f"Source file {src_path} deleted successfully.")
+        except Exception as e:
+            logger.error(f"Error deleting source file: {e}")
+    else:
+        logger.error(f"MD5 mismatch: File copy failed.")
+        # 删除目标文件
+        try:
+            dest_path.unlink()
+            logger.info(f"Copied file {dest_path} deleted.")
+        except Exception as e:
+            logger.error(f"Error deleting copied file: {e}")
+
+def start_update_program(file_path):
+    try:
+        logger.info(f"[start_update_program]: start connect to server {HOST_DEVM_UPDATE}:{PORT_DEVM_UPDATE}\n")
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(120)   # time out 120S
+            logger.info(f"[start_update_program]: start connect to server localhost:{PORT_DEVM_UPDATE}\n")
+            server_address = ("localhost", PORT_DEVM_UPDATE)
+            s.connect(server_address)
+            logger.info("[start_update_program]: connect to server\n")
+
+    except KeyboardInterrupt:
+        logger.error("[start_update_program]: Manual Close...\n")
+        return False
+    except Exception as e:
+        logger.error(f"[start_update_program]: disconnect of server: {e}\n")
+        return False
+    return True
+
 def handle_json_command(uart, cmd):
     """Handle JSON format commands for file transfer"""
     global file_recv_state
@@ -1389,6 +1484,29 @@ def handle_file_end(uart):
         }
         uart.send_serial(json.dumps(response))
         logger.info(f"File transfer completed successfully: {final_path} ({file_size} bytes, MD5: {actual_md5})")
+
+        # Firmware update logic (optional, only for ZIP files)
+        try:
+            filename = file_recv_state["filename"]
+            if filename.lower().endswith('.zip'):
+                logger.info(f"ZIP file detected, checking for firmware update...")
+
+                update_res_path = None
+                with open(UNIT_CONFIG_PATH, 'r') as file:
+                    unit_config = json.load(file)
+                    update_res_path = unit_config.get('DEVM_UPDATE_RES_PATH')
+
+                download_path = Path(update_res_path)
+                download_path.mkdir(parents=True, exist_ok=True)
+                application_dst_path = Path(update_res_path) / filename
+
+                if not has_zip_file(update_res_path):
+                    copy_and_verify(final_path, application_dst_path, actual_md5)
+                    logger.info(f"update_res_path application_dst_path is {application_dst_path}")
+                    start_update_program(application_dst_path)
+
+        except Exception as e:
+            logger.error(f"Error during firmware update process: {e}")
 
         # Reset state
         file_recv_state["active"] = False
