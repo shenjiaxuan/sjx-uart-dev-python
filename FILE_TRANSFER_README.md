@@ -34,7 +34,7 @@ For complete protocol specification, see [PROTOCOL_SPECIFICATION.md](PROTOCOL_SP
 
 ### Receiver Side (Device)
 
-The file transfer receiver is integrated into `uart_control.py` (version 3.1.0+):
+The file transfer receiver is integrated into `uart_control.py` (version 3.2.0+):
 
 ```bash
 # No special configuration needed
