@@ -143,7 +143,12 @@ def validate_image(image_data, logger):
 if __name__ == '__main__':
     # 设置日志
     logger = setup_logging()
-    
+
+    # 创建debug_img目录（如果不存在）
+    if not os.path.exists("debug_img"):
+        os.makedirs("debug_img")
+        logger.info("Created debug_img directory")
+
     # Delete recv_test.json file if it exists
     if os.path.exists("recv_test.json"):
         os.remove("recv_test.json")
@@ -234,9 +239,9 @@ if __name__ == '__main__':
                 is_valid, validation_msg = validate_image(combined_image_data, logger)
                 
                 if is_valid:
-                    # 图片校验通过，保存图片（覆盖写入）
+                    # 图片校验通过，保存图片到debug_img目录
                     try:
-                        save_image(combined_image_data, "combined_image_1.bmp")
+                        save_image(combined_image_data, f"debug_img/combined_image_{run_count}.bmp")
                         logger.info(f"第 {run_count} 次运行：图片保存成功 - {validation_msg}")
                     except Exception as e:
                         logger.error(f"第 {run_count} 次运行：图片保存失败 - {str(e)}")
@@ -249,7 +254,7 @@ if __name__ == '__main__':
             print(f"Test iteration {run_count} completed. Waiting 10 minutes for next run...")
             
             # 等待10分钟（600秒）
-            time.sleep(600)
+            time.sleep(120)
             
     except KeyboardInterrupt:
         logger.info(f"程序被用户中断，总共完成了 {run_count} 次运行")

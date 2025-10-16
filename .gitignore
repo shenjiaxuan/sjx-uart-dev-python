@@ -4,5 +4,9 @@
 # Ignore other files or directories
 *.log
 recv_test.json
-combined_image.bmp
 __pycache__/
+debug_img/
+__init__.py
+*.png
+*.zip
+*.bin
