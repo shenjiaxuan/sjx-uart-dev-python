@@ -121,6 +121,11 @@ previous_counting_data_left = {}
 previous_counting_data_right = {}
 cds_alerts_received = False
 
+# 新增：缓存从SDK推送过来的counting数据
+latest_counting_data_left = {}
+latest_counting_data_right = {}
+counting_data_lock = threading.Lock()
+
 # Speed data globals
 speed_data_left = {}  # {direction_class: [speed_values]}
 speed_data_right = {}
@@ -226,62 +231,43 @@ def sdk_logout():
         logger.info(f"SDK logout response: {response}")
         sdk_token = None
 
-def sdk_get_counting_data(camera_id):
-    """从 SDK 获取计数数据（不负责token管理，由心跳线程维护）"""
-    if not sdk_token:
-        logger.warning("No valid token available for get_counting_data")
-        return None
-
-    # 根据 camera_id 确定使用的摄像头标识
-    if camera_id == CAM1_ID:
-        camera_name = "left"
-    elif camera_id == CAM2_ID:
-        camera_name = "right"
-    else:
-        logger.error(f"Invalid camera_id for SDK counting: {camera_id}")
-        return None
-
-    request = {"cmd": "get_dnn_counting_req", "camera_id": camera_name, "token": sdk_token}
-    response = send_json_request(request)
-    logger.info(f"-----------SDK counting data: {response}")
-    return response
-
-def sdk_heartbeat():
-    """发送心跳保持连接"""
-    global sdk_token
-    
-    if sdk_token:
-        request = {"cmd": "heartbeat_req", "token": sdk_token}
-        response = send_json_request(request)
-        if response and response.get("ret_code") != 0:
-            logger.warning("SDK heartbeat failed, need to re-login")
-            # 心跳失败，尝试重新登录
-            if sdk_login():  # sdk_login() 会直接设置全局 sdk_token
-                logger.info("SDK re-login successful after heartbeat failure")
-                return True
-            else:
-                logger.error("SDK re-login failed after heartbeat failure")
-                return False
-        return True
-    else:
-        # Token不存在，尝试登录
-        if sdk_login():  # sdk_login() 会直接设置全局 sdk_token
-            logger.info("SDK login successful in heartbeat")
-            return True
-        return False
-
-def sdk_heartbeat_thread():
-    """心跳线程，定期发送心跳"""
-    while True:
-        try:
-            sdk_heartbeat()
-            time.sleep(30)  # 每30秒发送一次心跳
-        except Exception as e:
-            logger.error(f"SDK heartbeat thread error: {e}")
-            time.sleep(30)
+# 注释掉：SDK不再校验token，不需要心跳机制
+# def sdk_heartbeat():
+#     """发送心跳保持连接"""
+#     global sdk_token
+#
+#     if sdk_token:
+#         request = {"cmd": "heartbeat_req", "token": sdk_token}
+#         response = send_json_request(request)
+#         if response and response.get("ret_code") != 0:
+#             logger.warning("SDK heartbeat failed, need to re-login")
+#             # 心跳失败，尝试重新登录
+#             if sdk_login():  # sdk_login() 会直接设置全局 sdk_token
+#                 logger.info("SDK re-login successful after heartbeat failure")
+#                 return True
+#             else:
+#                 logger.error("SDK re-login failed after heartbeat failure")
+#                 return False
+#         return True
+#     else:
+#         # Token不存在，尝试登录
+#         if sdk_login():  # sdk_login() 会直接设置全局 sdk_token
+#             logger.info("SDK login successful in heartbeat")
+#             return True
+#         return False
+#
+# def sdk_heartbeat_thread():
+#     """心跳线程，定期发送心跳"""
+#     while True:
+#         try:
+#             sdk_heartbeat()
+#             time.sleep(30)  # 每30秒发送一次心跳
+#         except Exception as e:
+#             logger.error(f"SDK heartbeat thread error: {e}")
+#             time.sleep(30)
 
 def sdk_set_event_server_info(server_ip, server_port):
-    """设置事件服务器信息（不负责token管理，由心跳线程维护）"""
+    """设置事件服务器信息"""
     if not sdk_token:
         logger.warning("No valid token available for set_event_server_info")
         return False
@@ -302,7 +288,7 @@ def sdk_set_event_server_info(server_ip, server_port):
         return False
 
 def sdk_get_camera_param(camera_id):
-    """从 SDK 获取摄像头参数（不负责token管理，由心跳线程维护）"""
+    """从 SDK 获取摄像头参数"""
     if not sdk_token:
         logger.warning("No valid token available for get_camera_param")
         return None
@@ -326,7 +312,7 @@ def sdk_get_camera_param(camera_id):
         return None
 
 def sdk_get_hardware_status(modules=None):
-    """从SDK获取硬件状态（不负责token管理，由心跳线程维护）"""
+    """从SDK获取硬件状态"""
     if not sdk_token:
         logger.warning("No valid token available for get_hardware_status")
         return None
@@ -342,7 +328,7 @@ def sdk_get_hardware_status(modules=None):
         return None
 
 def sdk_set_hardware_status(module, status):
-    """通过SDK设置硬件状态（不负责token管理，由心跳线程维护）"""
+    """通过SDK设置硬件状态"""
     if not sdk_token:
         logger.warning("No valid token available for set_hardware_status")
         return False
@@ -601,44 +587,18 @@ def receive_data(socket_key, buffer_size):
         sockets[socket_key] = None
         return None
 
-def send_cds_command(socket_key, command):
-    """发送命令到CDS服务器 - 只使用命令socket"""
-    sock = sockets[socket_key]
-    if sock is None:
-        logger.error(f"No CDS command socket connection for {socket_key}")
-        return None
-        
-    try:
-        command_json = json.dumps(command)
-        sock.send(command_json.encode('utf-8'))
-        
-        response = sock.recv(4096)
-        if response:
-            return json.loads(response.decode('utf-8'))
-        return None
-        
-    except Exception as e:
-        logger.error(f"CDS command error for {socket_key}: {e}")
-        sockets[socket_key] = None
-        return None
-
 def get_cds_counting_data():
-    """从SDK获取计数数据"""
+    """从缓存获取计数数据（不再主动调用SDK，而是使用推送的数据）"""
     left_counting_data = {}
     right_counting_data = {}
-    
-    if cam_in_use == 1 or cam_in_use == 3:  # 左摄像头
-        response = sdk_get_counting_data(CAM1_ID)
-        if response and 'counting_results' in response:
-            counting_results = response.get("counting_results", {})
-            left_counting_data = counting_results
-    
-    if cam_in_use == 2 or cam_in_use == 3:  # 右摄像头
-        response = sdk_get_counting_data(CAM2_ID)
-        if response and 'counting_results' in response:
-            counting_results = response.get("counting_results", {})
-            right_counting_data = counting_results
-    
+
+    with counting_data_lock:
+        if cam_in_use == 1 or cam_in_use == 3:  # 左摄像头
+            left_counting_data = latest_counting_data_left.copy()
+
+        if cam_in_use == 2 or cam_in_use == 3:  # 右摄像头
+            right_counting_data = latest_counting_data_right.copy()
+
     return left_counting_data, right_counting_data
 
 def process_cumulative_counting(current_data, camera_side):
@@ -937,62 +897,117 @@ def update_sim_attribute(cam_in_use):
     # 打印图像块数信息
     logger.info(f"Image saved and split into {len(str_image)} blocks (total size: {str_len} bytes, block size: {send_max_length} bytes)")
 
+def handle_assetmnt_alert(camera_id):
+    """处理ASSETMNT事件（资产评估/行人报警）- 在独立线程中执行"""
+    global cds_alerts_received, emer_mode, cam1_image_shm_ptr, cam2_image_shm_ptr, cam_in_use
+
+    # 验证报警来源的相机是否与当前使用的相机配置匹配
+    should_process_alert = False
+    if camera_id == "left" and (cam_in_use == 1 or cam_in_use == 3):
+        should_process_alert = True
+        logger.info(f"Processing ASSETMNT alert from left camera (cam_in_use={cam_in_use})")
+    elif camera_id == "right" and (cam_in_use == 2 or cam_in_use == 3):
+        should_process_alert = True
+        logger.info(f"Processing ASSETMNT alert from right camera (cam_in_use={cam_in_use})")
+    else:
+        logger.info(f"Ignoring ASSETMNT alert from {camera_id} camera (cam_in_use={cam_in_use})")
+
+    if should_process_alert:
+        cds_alerts_received = True
+        # Set emergency mode when alert received
+        emer_mode = 1
+        logger.info(f"emer_mode set to {emer_mode} by ASSETMNT alert from {camera_id} camera")
+
+        # Save images to buffer when emer_mode is set to 1
+        if cam_in_use == 1 or cam_in_use == 3:
+            get_pic_from_socket(cam1_image_shm_ptr, CAM1_ID)
+        if cam_in_use == 2 or cam_in_use == 3:
+            get_pic_from_socket(cam2_image_shm_ptr, CAM2_ID)
+        update_sim_attribute(cam_in_use)
+
 def handle_sdk_client_connection(client_socket, client_address):
     """处理来自SDK的单个客户端连接"""
     logger.info(f"SDK client connected from {client_address}")
     global cds_alerts_received, emer_mode, cam1_image_shm_ptr, cam2_image_shm_ptr, cam_in_use
+    global latest_counting_data_left, latest_counting_data_right
+
+    buffer = ""  # 接收缓冲区
+
     try:
         while True:
             data = client_socket.recv(40960)
             if not data:
                 break
-                
-            try:
-                message = json.loads(data.decode('utf-8'))
-                # logger.info(f"Received data from SDK client {client_address}: {message}")
-                event_type = message.get("event_type")
-                camera_id = message.get("camera_id", "unknown")
 
-                if event_type == "speed":
-                    data_part = message.get("cds_data", {})
-                    speed_event = data_part.get("speed_event", {})
-                    process_speed_data(speed_event, camera_id)
-                elif event_type == "pedestrian":
-                    logger.info(f"Received CDS alert from {client_address}: {message}")
-                    
-                    # 验证报警来源的相机是否与当前使用的相机配置匹配
-                    should_process_alert = False
-                    if camera_id == "left" and (cam_in_use == 1 or cam_in_use == 3):
-                        should_process_alert = True
-                        logger.info(f"Processing pedestrian alert from left camera (cam_in_use={cam_in_use})")
-                    elif camera_id == "right" and (cam_in_use == 2 or cam_in_use == 3):
-                        should_process_alert = True
-                        logger.info(f"Processing pedestrian alert from right camera (cam_in_use={cam_in_use})")
+            # 累积数据到缓冲区
+            buffer += data.decode('utf-8')
+
+            # 按换行符分割处理所有完整的消息
+            while '\n' in buffer:
+                line, buffer = buffer.split('\n', 1)
+                line = line.strip()
+
+                # 跳过空行
+                if not line:
+                    continue
+
+                try:
+                    message = json.loads(line)
+                    event_type = message.get("event_type")
+                    camera_id = message.get("camera_id", "unknown")
+
+                    # 处理 SPEED 事件
+                    if event_type == "SPEED":
+                        cds_data = message.get("cds_data", {})
+                        outputs = cds_data.get("outputs", [])
+
+                        if outputs and len(outputs) > 0:
+                            speed_event = outputs[0].get("speed_event", {})
+                            # 在独立线程中处理速度数据，避免阻塞消息接收
+                            speed_thread = threading.Thread(
+                                target=process_speed_data,
+                                args=(speed_event, camera_id),
+                                daemon=True
+                            )
+                            speed_thread.start()
+
+                    # 处理 TRFFCCNT 事件（计数）
+                    elif event_type == "TRFFCCNT":
+                        cds_data = message.get("cds_data", {})
+                        outputs = cds_data.get("outputs", [])
+
+                        if outputs and len(outputs) > 0:
+                            counting_results = outputs[0].get("counting_results", {})
+
+                            # 缓存 counting 数据
+                            with counting_data_lock:
+                                if camera_id == "left":
+                                    latest_counting_data_left = counting_results
+                                elif camera_id == "right":
+                                    latest_counting_data_right = counting_results
+
+                    # 处理 ASSETMNT 事件（资产评估/行人报警）
+                    elif event_type == "ASSETMNT":
+                        logger.info(f"Received ASSETMNT alert from {client_address}: camera={camera_id}")
+                        # 在独立线程中处理报警事件，避免阻塞消息接收
+                        alert_thread = threading.Thread(
+                            target=handle_assetmnt_alert,
+                            args=(camera_id,),
+                            daemon=True
+                        )
+                        alert_thread.start()
+
+                    # 其他事件类型
+                    elif event_type == "parking":
+                        logger.info(f"Received parking event")
                     else:
-                        logger.info(f"Ignoring pedestrian alert from {camera_id} camera (cam_in_use={cam_in_use})")
-                    
-                    if should_process_alert:
-                        cds_alerts_received = True
-                        # Set emergency mode when alert received
-                        emer_mode = 1
-                        logger.info(f"emer_mode set to {emer_mode} by CDS alert from {camera_id} camera")
-                        
-                        # Save images to buffer when emer_mode is set to 1
-                        if cam_in_use == 1 or cam_in_use == 3:
-                            get_pic_from_socket(cam1_image_shm_ptr, CAM1_ID)
-                        if cam_in_use == 2 or cam_in_use == 3:
-                            get_pic_from_socket(cam2_image_shm_ptr, CAM2_ID)
-                        update_sim_attribute(cam_in_use)
-                elif event_type == "parking":
-                    logger.info(f"Received parking event: {message}")
-                else:
-                    logger.info(f"Received unknown event type '{event_type}': {message}")
-                    
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to decode JSON from SDK client {client_address}: {e}")
-            except Exception as e:
-                logger.error(f"Error processing data from SDK client {client_address}: {e}")
-                
+                        logger.info(f"Received unknown event type '{event_type}'")
+
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to decode JSON from SDK client {client_address}: {e}, line: {line}")
+                except Exception as e:
+                    logger.error(f"Error processing data from SDK client {client_address}: {e}")
+
     except Exception as e:
         logger.error(f"Error handling SDK client {client_address}: {e}")
     finally:
@@ -1564,9 +1579,10 @@ def main():
         logger.error("Failed to login to SDK, but continuing...")
     
     # Start SDK heartbeat thread
-    heartbeat_thread = Thread(target=sdk_heartbeat_thread)
-    heartbeat_thread.daemon = True
-    heartbeat_thread.start()
+    # 注释掉：SDK不再校验token，不需要心跳机制
+    # heartbeat_thread = Thread(target=sdk_heartbeat_thread)
+    # heartbeat_thread.daemon = True
+    # heartbeat_thread.start()
 
     # Start event server to receive event data from SDK
     logger.info("Starting event server for SDK event data...")
