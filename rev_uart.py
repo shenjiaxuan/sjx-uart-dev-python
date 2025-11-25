@@ -8,6 +8,8 @@ import serial
 import time
 
 TEST_RUN_COUNT = 1
+send_max_length = 980
+# max_image_blocks = 80  # 预设最大值，实际以空块判断为准
 
 class UART:
     def __init__(self):
@@ -92,31 +94,13 @@ if __name__ == '__main__':
         "?ERR",
         # "REACT|1",
         "REACT|",
+        "BLK|20",      # 设置图像块数量
         "?OBdata",
         "?PS1",
         "?PS2",
         "?PS3",
-        "?PS4",
-        "?PS5",
-        "?PS6",
-        "?PS7",
-        "?PS8",
-        "?PS9",
-        "?PS10",
-        "?PS11",
-        "?PS12",
-        "?PS13",
-        "?PS14",
-        "?PS15",
-        "?PS16",
-        "?PS17",
-        "?PS18",
-        "?PS19",
-        "?PS20",
-        "?PS21",
-        "?PS22",
-        "?PS23",
-        "?PS24"
+        "?PS4"
+        # ?PS5 开始的图像块将动态请求
     ]
 
     uart = UART()
@@ -149,6 +133,65 @@ if __name__ == '__main__':
                             time.sleep(2) # delay for esp32 image processing
                 else:
                     break
+
+        # 动态请求图像块（?PS5 开始），直到收到空块
+        print("开始动态请求图像块...")
+        image_block_start_time = time.time()
+        total_sleep_time = 0  # 累计 sleep 时间
+        ps_index = 5
+        max_attempts = 100  # 安全上限，防止无限循环
+        while ps_index < max_attempts:
+            command = f"?PS{ps_index}"
+            uart.send_serial(command)
+            sleep_duration = 0.5
+            time.sleep(sleep_duration)
+            total_sleep_time += sleep_duration
+
+            response_received = False
+            while True:
+                response = uart.receive_serial()
+                if response:
+                    response_str = response.decode("utf_8", "ignore").rstrip()
+                    print(time.strftime("%B-%d-%Y %H:%M:%S") + "  <-: {0}".format(response_str))
+                    response_received = True
+
+                    if response_str.startswith('{"Block'):
+                        try:
+                            json_data = json.loads(response_str)
+                            block_key = f"Block{ps_index - 4}"
+
+                            # 检查是否是空块
+                            if block_key in json_data:
+                                if json_data[block_key] == "":
+                                    image_block_end_time = time.time()
+                                    total_elapsed = image_block_end_time - image_block_start_time
+                                    actual_processing_time = total_elapsed - total_sleep_time
+                                    print(f"收到空块 {block_key}，图像读取完成，共接收 {ps_index - 5} 个图像块")
+                                    print(f"图像块接收统计：总耗时 {total_elapsed:.2f}秒，纯处理时间 {actual_processing_time:.2f}秒")
+                                    ps_index = max_attempts  # 退出外层循环
+                                    break
+                                else:
+                                    # 有数据，添加到列表
+                                    image_data_list.append(json_data[block_key])
+                                    append_response_to_file(command, {"image_data_received": True})
+                                    ps_index += 1
+                                    break
+                        except json.JSONDecodeError:
+                            print(f"Failed to decode JSON for {command}")
+                            break
+                    else:
+                        break
+                else:
+                    break
+
+            # 如果没有收到响应，停止请求
+            if not response_received:
+                image_block_end_time = time.time()
+                total_elapsed = image_block_end_time - image_block_start_time
+                actual_processing_time = total_elapsed - total_sleep_time
+                print(f"未收到 {command} 的响应，停止请求")
+                print(f"图像块接收统计：总耗时 {total_elapsed:.2f}秒，纯处理时间 {actual_processing_time:.2f}秒")
+                break
 
         if image_data_list:
             combined_image_data = ''.join(image_data_list)

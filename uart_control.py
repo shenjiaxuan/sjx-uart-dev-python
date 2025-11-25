@@ -96,6 +96,7 @@ APP_NUMBER_ASSET = "698"
 APP_NUMBER_TRAFFIC = "699"
 
 send_max_length = 980
+max_image_blocks = 20  # 最大图像块数量，默认20，最大80
 count_interval = "300"
 profile_index = 3
 emer_mode = 0  # corrected from ener_mode
@@ -849,10 +850,26 @@ class UART:
         return rcvdata
 
 def save_image_with_target_size(image, cam_in_use):
-    target_size = 12800 #12800 #10240 # 15360 #Bytes
+    # 根据最大图像块数量动态计算目标大小
+    # Base64 编码率 4/3，所以原始数据 = Base64大小 × 0.75
+    target_size = int(max_image_blocks * send_max_length * 0.75)
     filepath = './tmp/converted-jpg-image.jpg'
-    #quality = 20 & 35 is an experience value
-    quality = 20 if cam_in_use == 3 else 35
+
+    # 根据 target_size 分段设置初始 quality
+    if cam_in_use == 3:  # 双摄像头
+        if target_size < 20000:
+            quality = 20    # 小容量：低质量
+        elif target_size < 40000:
+            quality = 60    # 中容量：中等质量
+        else:
+            quality = 85    # 大容量：高质量
+    else:  # 单摄像头
+        if target_size < 20000:
+            quality = 35    # 小容量：低质量
+        elif target_size < 40000:
+            quality = 80    # 中容量：中等质量
+        else:
+            quality = 95    # 大容量：高质量
     while quality > 0:
         logger.debug(f"*******************Quality: {quality}")
         # save image to tmp_file. One cycle takes about 8ms
@@ -1544,7 +1561,7 @@ def main():
     global count_interval, profile_index, emer_mode
     global IMAGE_HEIGHT, IMAGE_WIDTH, cam_in_use, cam_in_use_actual
     global cam1_image_shm_ptr, cam2_image_shm_ptr
-    global emer_imgage_send
+    global emer_imgage_send, max_image_blocks
 
     # 打印当前版本
     logger.info("===========================================")
@@ -1637,6 +1654,20 @@ def main():
 
     # Step 4: 读取用户配置并验证
     local_config = load_config("config.json")
+
+    # 读取最大图像块数量配置
+    max_image_blocks = local_config.get("TotalImageBlocks", 20)
+    # 限制在有效范围内 (20-80)
+    max_image_blocks = max(20, min(80, max_image_blocks))
+    logger.info(f"Max image blocks set to: {max_image_blocks}")
+
+    # 如果配置文件中没有该字段，或值被修正了，写入配置文件
+    if "TotalImageBlocks" not in local_config or local_config["TotalImageBlocks"] != max_image_blocks:
+        local_config["TotalImageBlocks"] = max_image_blocks
+        with open("config.json", "w", encoding="utf-8") as file:
+            json.dump(local_config, file, indent=4)
+        logger.info(f"TotalImageBlocks saved to config.json: {max_image_blocks}")
+
     sensor_num_config = local_config.get("cam_in_use", "dual")
     
     if sensor_num_config in ["1", "left"]:
@@ -1873,6 +1904,32 @@ def main():
                 # Reset speed data for next cycle
                 reset_speed_data()
 
+            elif string[:4] == "BLK|":
+                # 处理BLK|xxx命令，设置最大图像块数量
+                try:
+                    if string[4:]:
+                        block_count = int(string[4:])
+                        # 限制在20-80范围内
+                        block_count = max(20, min(80, block_count))
+                        max_image_blocks = block_count
+
+                        # 持久化保存到配置文件
+                        local_config = load_config("config.json")
+                        local_config["TotalImageBlocks"] = block_count
+                        with open("config.json", "w", encoding="utf-8") as file:
+                            json.dump(local_config, file, indent=4)
+
+                        logger.info(f"Max image blocks set to: {block_count}")
+                        response = json.dumps({"TotalImageBlocks": str(block_count)})
+                    else:
+                        # 如果没有参数，返回当前设置
+                        response = json.dumps({"TotalImageBlocks": str(max_image_blocks)})
+                except ValueError:
+                    # 参数不是有效数字
+                    logger.error(f"Invalid BLK parameter: {string[4:]}")
+                    response = json.dumps({"TotalImageBlocks": str(max_image_blocks), "Error": "Invalid parameter"})
+                uart.send_serial(response)
+
             elif string[:3] == "?PS":
                 index = int(string[3:])
                 if index in [1, 2]:
@@ -1945,30 +2002,30 @@ def main():
                         # 不符合条件时发送空字典
                         response = json.dumps({})
                     uart.send_serial(response)
-                elif index >= 5 and index < 25:  # 从index=5开始处理图像块，到index=24结束
+                elif index >= 5 and index < (5 + max_image_blocks):  # 从index=5开始处理图像块，动态范围
                     block_index = index - 5  # 计算实际的数组索引
-                    
+
                     if block_index < len(str_image):
                         # 发送实际存在的图像块
                         if block_index == 0 and emer_mode == 1:
                             emer_imgage_send = 1
                         response = "{\"Block" + str(block_index + 1) + "\":\"" + str_image[block_index] + "\"}"
                         uart.send_serial(response)
-                        
+
                         # 检查是否发送完最后一块
                         if block_index == len(str_image) - 1 and emer_imgage_send == 1:
                             emer_imgage_send = 0
                             emer_mode = 0
                             logger.debug(f"Emergency mode image sending completed at block {block_index + 1}")
                     else:
-                        # 超出实际图像块范围但小于25，返回空包
+                        # 超出实际图像块范围但在最大范围内，返回空包
                         response = "{\"Block" + str(block_index + 1) + "\":\"\"}"
                         uart.send_serial(response)
-                        # 如果在紧急模式下到达index=24，结束紧急模式
-                        if index == 24 and emer_imgage_send == 1:
+                        # 如果在紧急模式下到达最大索引，结束紧急模式
+                        if index == (4 + max_image_blocks) and emer_imgage_send == 1:
                             emer_imgage_send = 0
                             emer_mode = 0
-                            logger.debug(f"Emergency mode ended at index 24, actual blocks: {len(str_image)}")
+                            logger.debug(f"Emergency mode ended at index {index}, actual blocks: {len(str_image)}")
                 else:
                     logger.error(f"Unexpected PS index: ?PS{index}")
 
