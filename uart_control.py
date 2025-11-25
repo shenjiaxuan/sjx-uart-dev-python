@@ -92,7 +92,7 @@ IMAGE_HEIGHT = 300
 IMAGE_WIDTH = 300
 
 # AppNumber definitions
-APP_NUMBER_EMERGENCY = "698"
+APP_NUMBER_ASSET = "698"
 APP_NUMBER_TRAFFIC = "699"
 
 send_max_length = 980
@@ -1689,9 +1689,6 @@ def main():
 
             # Original command handling
             if string == "?Asset":
-                # Set AppNumber based on emergency mode status
-                app_number = APP_NUMBER_EMERGENCY if emer_mode == 1 else APP_NUMBER_TRAFFIC
-                
                 asset_data = {
                     "MfrName": config["MfrName"],
                     "ModelNumber": config["ModelNumber"],
@@ -1699,7 +1696,7 @@ def main():
                     "MfgDate": config["MfgDate"],
                     "FWVersion": config["FWVersion"],
                     "HWVersion": config["HWVersion"],
-                    "AppNumber": app_number
+                    "AppNumber": config["AppNumber"]
                 }
                 response = json.dumps(asset_data)
                 uart.send_serial(response)
