@@ -25,7 +25,7 @@ import shutil
 # ================================
 # VERSION INFORMATION
 # ================================
-VERSION = "3.2.2"  # Added file transfer support
+VERSION = "3.2.3"
 
 # ================================
 # CAMERA CONFIGURATION LOGIC
