@@ -25,7 +25,7 @@ import shutil
 # ================================
 # VERSION INFORMATION
 # ================================
-VERSION = "3.2.3"
+VERSION = "3.2.4"
 
 # ================================
 # CAMERA CONFIGURATION LOGIC
@@ -174,6 +174,33 @@ def setup_logger():
 
 # Global logger
 logger = setup_logger()
+
+def kill_main_processes():
+    """杀掉所有./main进程"""
+    try:
+        # 查找所有./main进程
+        result = subprocess.run(['ps', '-aux'], capture_output=True, text=True)
+        processes = result.stdout.split('\n')
+
+        killed_count = 0
+        for process in processes:
+            if './main' in process and 'grep' not in process:
+                # 提取PID（第二列）
+                parts = process.split()
+                if len(parts) >= 2:
+                    pid = parts[1]
+                    try:
+                        subprocess.run(['kill', '-9', pid], check=True)
+                        logger.info(f"Killed ./main process with PID: {pid}")
+                        killed_count += 1
+                    except subprocess.CalledProcessError as e:
+                        logger.error(f"Failed to kill process {pid}: {e}")
+
+        logger.info(f"Total ./main processes killed: {killed_count}")
+        return killed_count > 0
+    except Exception as e:
+        logger.error(f"Error killing main processes: {e}")
+        return False
 
 def connect_socket(server_address, socket_key):
     while True:
@@ -797,6 +824,27 @@ def get_pic_from_socket(shm_ptr, cam_id):
 def load_config(path):
     with open(path, 'r') as file:
         return json.load(file)
+
+# def save_config(path, config):
+#     """保存配置到JSON文件，使用原子写入确保安全"""
+#     try:
+#         # 先写入临时文件
+#         temp_path = path + '.tmp'
+#         with open(temp_path, 'w', encoding='utf-8') as file:
+#             json.dump(config, file, indent=4, ensure_ascii=False)
+
+#         # 原子性地替换原文件
+#         os.replace(temp_path, path)
+#         return True
+#     except Exception as e:
+#         logger.error(f"Failed to save config to {path}: {e}")
+#         # 清理临时文件
+#         if os.path.exists(temp_path):
+#             try:
+#                 os.remove(temp_path)
+#             except:
+#                 pass
+#         return False
 
 def get_wifi_status():
     result = subprocess.run(['nmcli', '-t', '-f', 'WIFI', 'radio'], capture_output=True, text=True)
@@ -1790,6 +1838,71 @@ def main():
                     wifi_status = wifi_cur_config
                 response = json.dumps({"WiFiEnable": int(wifi_status)})
                 uart.send_serial(response)
+            # elif string[:5] == "WFPW|":
+            #     # 解析base64编码的密码
+            #     try:
+            #         if string[5:]:
+            #             # Base64解码密码
+            #             encoded_password = string[5:]
+            #             try:
+            #                 new_password = base64.b64decode(encoded_password).decode('utf-8')
+            #             except Exception as e:
+            #                 logger.error(f"Failed to decode password: {e}")
+            #                 response = json.dumps({"Password": "error", "reason": "invalid_base64"})
+            #                 uart.send_serial(response)
+            #                 continue
+
+            #             # 验证密码合法性（WiFi密码要求8-63个字符）
+            #             if len(new_password) < 8 or len(new_password) > 63:
+            #                 logger.error(f"Invalid password length: {len(new_password)}")
+            #                 response = json.dumps({"Password": "error", "reason": "invalid_length"})
+            #                 uart.send_serial(response)
+            #                 continue
+
+            #             # 读取配置文件
+            #             try:
+            #                 gs501_config = load_config(CONFIG_PATH)
+            #             except Exception as e:
+            #                 logger.error(f"Failed to read config: {e}")
+            #                 response = json.dumps({"Password": "error", "reason": "config_read_failed"})
+            #                 uart.send_serial(response)
+            #                 continue
+
+            #             # 修改AP_PASSWORD字段
+            #             old_password = gs501_config.get("AP_PASSWORD", "")
+            #             gs501_config["AP_PASSWORD"] = new_password
+
+            #             # 保存配置文件
+            #             if save_config(CONFIG_PATH, gs501_config):
+            #                 # 返回base64编码的新密码作为确认
+            #                 encoded_response = base64.b64encode(new_password.encode('utf-8')).decode('utf-8')
+            #                 response = json.dumps({"Password": encoded_response})
+            #                 uart.send_serial(response)
+
+            #                 logger.info(f"WiFi password updated successfully (length: {len(new_password)})")
+            #                 # 注意：不记录明文密码到日志
+
+            #                 # 触发kill_main_processes重启相关进程
+            #                 logger.info("Triggering process restart after password change...")
+            #                 kill_success = kill_main_processes()
+            #                 if kill_success:
+            #                     logger.info("Main processes killed successfully after password update")
+            #                 else:
+            #                     logger.warning("No main processes found to kill after password update")
+            #             else:
+            #                 # 配置保存失败
+            #                 response = json.dumps({"Password": "error", "reason": "config_save_failed"})
+            #                 uart.send_serial(response)
+            #                 logger.error("Failed to save WiFi password configuration")
+            #         else:
+            #             # 没有提供密码
+            #             response = json.dumps({"Password": "error", "reason": "no_password"})
+            #             uart.send_serial(response)
+
+            #     except Exception as e:
+            #         logger.error(f"Error processing WFPW command: {e}")
+            #         response = json.dumps({"Password": "error", "reason": str(e)})
+            #         uart.send_serial(response)
             elif string == "?ERR":
                 cam1_error_code = check_camera_errors(CAMERA1_DIAGNOSE_INFO_PATH)
                 cam2_error_code = check_camera_errors(CAMERA2_DIAGNOSE_INFO_PATH)
@@ -1929,6 +2042,18 @@ def main():
                     logger.error(f"Invalid BLK parameter: {string[4:]}")
                     response = json.dumps({"TotalImageBlocks": str(max_image_blocks), "Error": "Invalid parameter"})
                 uart.send_serial(response)
+
+            elif string == "?RST":
+                # 返回响应
+                response = json.dumps({"CamReset": 1})
+                uart.send_serial(response)
+
+                # 杀掉./main进程
+                kill_success = kill_main_processes()
+                if kill_success:
+                    logger.info("RST command completed successfully")
+                else:
+                    logger.warning("RST command completed but no processes were killed")
 
             elif string[:3] == "?PS":
                 index = int(string[3:])
