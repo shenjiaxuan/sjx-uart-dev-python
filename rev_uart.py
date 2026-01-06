@@ -1,7 +1,5 @@
 import os
 import base64
-from PIL import Image
-import io
 import json
 import re
 import serial
@@ -14,7 +12,7 @@ send_max_length = 980
 class UART:
     def __init__(self):
         self.uartport = serial.Serial(
-                port="COM3",
+                port="COM10",
                 baudrate=38400, # 115200
                 bytesize=serial.EIGHTBITS,
                 parity=serial.PARITY_NONE,
@@ -56,8 +54,8 @@ def append_response_to_file(command, response):
 
 def save_image(image_data, filename):
     image_binary = base64.b64decode(image_data)
-    image = Image.open(io.BytesIO(image_binary))
-    image.save(filename, format='BMP')
+    with open(filename, 'wb') as f:
+        f.write(image_binary)
     print(f"Saved image to {filename}")
 
 def fix_base64_padding(data):
@@ -94,7 +92,7 @@ if __name__ == '__main__':
         "?ERR",
         # "REACT|1",
         "REACT|",
-        "BLK|20",      # 设置图像块数量
+        "BLK|",      # 设置图像块数量
         "?OBdata",
         "?PS1",
         "?PS2",
@@ -111,7 +109,7 @@ if __name__ == '__main__':
 
         for command in commands:
             uart.send_serial(command)
-            time.sleep(0.5)
+            time.sleep(1)
             while True:
                 response = uart.receive_serial()
                 if response:
@@ -196,6 +194,6 @@ if __name__ == '__main__':
         if image_data_list:
             combined_image_data = ''.join(image_data_list)
             combined_image_data = fix_base64_padding(combined_image_data)
-            save_image(combined_image_data, f"combined_image_{run + 1}.bmp")
+            save_image(combined_image_data, f"combined_image_{run + 1}.jpg")
 
         time.sleep(1)
