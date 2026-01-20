@@ -25,7 +25,7 @@ import shutil
 # ================================
 # VERSION INFORMATION
 # ================================
-VERSION = "3.2.4"
+VERSION = "3.3.1"
 
 # ================================
 # CAMERA CONFIGURATION LOGIC
@@ -389,6 +389,20 @@ def set_wifi_status_via_sdk(enable):
     """通过SDK设置WiFi状态"""
     status = "open" if enable else "close"
     return sdk_set_hardware_status("wifi", status)
+
+def get_lte_status_from_sdk():
+    """通过SDK获取LTE状态"""
+    modules = ["lte"]
+    hardware_status = sdk_get_hardware_status(modules)
+    if hardware_status:
+        lte_status = hardware_status.get("lte_status", "disabled")
+        return lte_status
+    return "disabled"
+
+def set_lte_status_via_sdk(enable):
+    """通过SDK设置LTE状态"""
+    status = "open" if enable else "close"
+    return sdk_set_hardware_status("lte", status)
 
 def calculate_speed_weighted_average(direction_class, new_speed, speed_averages, speed_counts):
     """
@@ -1838,6 +1852,29 @@ def main():
                     wifi_status = wifi_cur_config
                 response = json.dumps({"WiFiEnable": int(wifi_status)})
                 uart.send_serial(response)
+
+            elif string[:5] == "CELL|":
+                # LTE硬件控制
+                # 获取当前LTE状态
+                lte_cur_config = 0
+                lte_status_str = get_lte_status_from_sdk()
+                if lte_status_str == 'enabled':
+                    lte_cur_config = 1
+
+                # 处理设置命令
+                if string[5:] and int(string[5:]) in [0, 1]:
+                    lte_target_status = str(string[5:])
+                    if lte_cur_config != int(lte_target_status):
+                        if int(lte_target_status) == 1:
+                            set_lte_status_via_sdk(True)
+                        else:
+                            set_lte_status_via_sdk(False)
+                else:
+                    lte_target_status = lte_cur_config
+
+                response = json.dumps({"CellularEnable": int(lte_target_status)})
+                uart.send_serial(response)
+
             # elif string[:5] == "WFPW|":
             #     # 解析base64编码的密码
             #     try:
@@ -2042,6 +2079,70 @@ def main():
                     logger.error(f"Invalid BLK parameter: {string[4:]}")
                     response = json.dumps({"TotalImageBlocks": str(max_image_blocks), "Error": "Invalid parameter"})
                 uart.send_serial(response)
+
+            elif string[:5] == "WFPW|":
+                try:
+                    param = string[5:].strip()
+
+                    if not param:
+                        # 查询模式 - 从 gs501.json 读取
+                        try:
+                            gs501_config = load_config(CONFIG_PATH)
+                            current_password = gs501_config.get("AP_PASSWORD", "")
+                            if current_password:
+                                encoded_pwd = base64.b64encode(current_password.encode('utf-8')).decode('utf-8')
+                                response = json.dumps({"Password": encoded_pwd})
+                            else:
+                                response = json.dumps({"Password": ""})
+                        except Exception as e:
+                            logger.error(f"Query password failed: {e}")
+                            response = json.dumps({"Password": ""})
+                        uart.send_serial(response)
+                    else:
+                        # 设置模式
+                        try:
+                            # Base64 解码
+                            new_password = base64.b64decode(param).decode('utf-8')
+
+                            # 密码验证
+                            if len(new_password) < 8:
+                                response = json.dumps({"Password": ""})
+                                uart.send_serial(response)
+                                continue
+                            if len(new_password) > 63:
+                                response = json.dumps({"Password": ""})
+                                uart.send_serial(response)
+                                continue
+
+                            # 调用 SDK
+                            request = {
+                                "cmd": "set_wifi_password_req",
+                                "password": new_password
+                            }
+                            sdk_response = send_json_request(request)
+
+                            # 处理响应
+                            if sdk_response and sdk_response.get("cmd") == "set_wifi_password_rsp":
+                                if sdk_response.get("ret_code") == 0:
+                                    encoded_pwd = base64.b64encode(new_password.encode('utf-8')).decode('utf-8')
+                                    response = json.dumps({"Password": encoded_pwd})
+                                    logger.info("WiFi password updated successfully")
+                                else:
+                                    response = json.dumps({"Password": ""})
+                            else:
+                                response = json.dumps({"Password": ""})
+                            uart.send_serial(response)
+
+                        except base64.binascii.Error:
+                            response = json.dumps({"Password": ""})
+                            uart.send_serial(response)
+                        except UnicodeDecodeError:
+                            response = json.dumps({"Password": ""})
+                            uart.send_serial(response)
+                except Exception as e:
+                    logger.error(f"WFPW error: {e}")
+                    response = json.dumps({"Password": ""})
+                    uart.send_serial(response)
 
             elif string == "?RST":
                 # 返回响应

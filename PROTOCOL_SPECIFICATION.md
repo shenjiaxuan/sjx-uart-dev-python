@@ -1,7 +1,7 @@
 # File Transfer Protocol Specification
 
 ## Version: 1.0
-## Last Updated: 2025-01-10
+## Last Updated: 2026-01-10
 
 ---
 
@@ -19,10 +19,6 @@ This protocol enables reliable file transfer over UART with error detection and 
 
 ### 1.3 Use Cases
 - Firmware updates
-- Configuration file deployment
-- Data collection/upload
-- Log file retrieval
-- Any binary file transfer over UART
 
 ---
 
