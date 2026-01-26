@@ -1,6 +1,6 @@
 """
-WiFi密码控制功能测试脚本
-通过串口发送WFPW|xxxx命令设置WiFi密码
+WiFi Password Control Test Script
+Test WiFi password setting via UART by sending WFPW|xxxx command
 """
 
 import serial
@@ -10,45 +10,45 @@ import time
 
 
 def encode_password(password: str) -> str:
-    """将密码进行Base64编码"""
+    """Encode password to Base64"""
     return base64.b64encode(password.encode('utf-8')).decode('utf-8')
 
 
 def decode_password(encoded_password: str) -> str:
-    """将Base64编码的密码解码"""
+    """Decode Base64 encoded password"""
     return base64.b64decode(encoded_password.encode('utf-8')).decode('utf-8')
 
 
 def test_wifi_password(port: str, baudrate: int, password: str = None, timeout: float = 5.0) -> bool:
     """
-    测试WiFi密码设置/查询功能
+    Test WiFi password setting/query function
 
     Args:
-        port: 串口号，如 'COM10'
-        baudrate: 波特率
-        password: 要设置的WiFi密码（明文），如果为None则查询当前密码
-        timeout: 等待响应的超时时间（秒）
+        port: Serial port number, e.g., 'COM10'
+        baudrate: Baud rate
+        password: WiFi password to set (plaintext), if None then query current password
+        timeout: Timeout for waiting response (seconds)
 
     Returns:
-        bool: 测试是否通过
+        bool: Whether the test passed
     """
-    # 判断是设置密码还是查询密码
+    # Determine whether to set or query password
     if password:
-        # 设置密码模式
+        # Set password mode
         encoded_password = encode_password(password)
         command = f"WFPW|{encoded_password}\r\n"
-        print(f"[INFO] 模式: 设置密码")
-        print(f"[INFO] 原始密码: {password}")
-        print(f"[INFO] Base64编码后: {encoded_password}")
+        print(f"[INFO] Mode: Set password")
+        print(f"[INFO] Original password: {password}")
+        print(f"[INFO] Base64 encoded: {encoded_password}")
     else:
-        # 查询密码模式
+        # Query password mode
         command = "WFPW|\r\n"
-        print(f"[INFO] 模式: 查询密码")
+        print(f"[INFO] Mode: Query password")
 
-    print(f"[INFO] 发送命令: {command.strip()}")
+    print(f"[INFO] Sending command: {command.strip()}")
 
     try:
-        # 打开串口
+        # Open serial port
         ser = serial.Serial(
             port=port,
             baudrate=baudrate,
@@ -58,24 +58,24 @@ def test_wifi_password(port: str, baudrate: int, password: str = None, timeout: 
             timeout=timeout
         )
 
-        print(f"[INFO] 串口 {port} 已打开，波特率: {baudrate}")
+        print(f"[INFO] Serial port {port} opened, baudrate: {baudrate}")
 
-        # 清空缓冲区
+        # Clear buffers
         ser.reset_input_buffer()
         ser.reset_output_buffer()
 
-        # 发送命令
+        # Send command
         ser.write(command.encode('utf-8'))
-        print("[INFO] 命令已发送，等待响应...")
+        print("[INFO] Command sent, waiting for response...")
 
-        # 等待并读取响应
+        # Wait and read response
         start_time = time.time()
         response_data = b""
 
         while time.time() - start_time < timeout:
             if ser.in_waiting > 0:
                 response_data += ser.read(ser.in_waiting)
-                # 检查是否收到完整的JSON响应
+                # Check if complete JSON response is received
                 try:
                     response_str = response_data.decode('utf-8').strip()
                     if response_str.startswith('{') and response_str.endswith('}'):
@@ -87,89 +87,89 @@ def test_wifi_password(port: str, baudrate: int, password: str = None, timeout: 
         ser.close()
 
         if not response_data:
-            print("[FAIL] 未收到响应")
+            print("[FAIL] No response received")
             return False
 
         response_str = response_data.decode('utf-8').strip()
-        print(f"[INFO] 收到响应: {response_str}")
+        print(f"[INFO] Response received: {response_str}")
 
-        # 解析JSON响应
+        # Parse JSON response
         try:
             response_json = json.loads(response_str)
         except json.JSONDecodeError as e:
-            print(f"[FAIL] JSON解析失败: {e}")
+            print(f"[FAIL] JSON parsing failed: {e}")
             return False
 
-        # 检查Password字段
+        # Check Password field
         if "Password" not in response_json:
-            print("[FAIL] 响应中缺少Password字段")
+            print("[FAIL] Password field missing in response")
             return False
 
         received_password = response_json["Password"]
 
-        # 检查是否为空（表示失败）
+        # Check if empty (indicates failure)
         if not received_password:
-            print("[FAIL] 返回的密码为空，操作失败")
+            print("[FAIL] Returned password is empty, operation failed")
             return False
 
-        # 解码返回的密码
+        # Decode returned password
         try:
             decoded_received = decode_password(received_password)
-            print(f"[INFO] 返回的密码(Base64): {received_password}")
-            print(f"[INFO] 返回的密码(解码后): {decoded_received}")
+            print(f"[INFO] Returned password (Base64): {received_password}")
+            print(f"[INFO] Returned password (decoded): {decoded_received}")
 
             if password:
-                # 设置密码模式：验证返回的密码是否与设置的一致
+                # Set password mode: verify returned password matches the one set
                 if decoded_received == password:
-                    print("[PASS] 密码设置成功，验证通过!")
+                    print("[PASS] Password set successfully, verification passed!")
                     return True
                 else:
-                    print(f"[FAIL] 密码不匹配! 期望: {password}, 实际: {decoded_received}")
+                    print(f"[FAIL] Password mismatch! Expected: {password}, Actual: {decoded_received}")
                     return False
             else:
-                # 查询密码模式：直接打印密码
-                print(f"[PASS] 当前WiFi密码: {decoded_received}")
+                # Query password mode: directly print password
+                print(f"[PASS] Current WiFi password: {decoded_received}")
                 return True
         except Exception as e:
-            print(f"[FAIL] 解码返回密码失败: {e}")
+            print(f"[FAIL] Failed to decode returned password: {e}")
             return False
 
     except serial.SerialException as e:
-        print(f"[ERROR] 串口错误: {e}")
+        print(f"[ERROR] Serial port error: {e}")
         return False
     except Exception as e:
-        print(f"[ERROR] 发生异常: {e}")
+        print(f"[ERROR] Exception occurred: {e}")
         return False
 
 
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description="WiFi密码控制功能测试")
-    parser.add_argument("password", nargs="?", default=None, help="要设置的WiFi密码（明文），不提供则查询当前密码")
-    parser.add_argument("-p", "--port", default="COM10", help="串口号（默认: COM10）")
-    parser.add_argument("-b", "--baudrate", type=int, default=38400, help="波特率（默认: 38400）")
-    parser.add_argument("-t", "--timeout", type=float, default=5.0, help="超时时间（秒，默认: 5.0）")
+    parser = argparse.ArgumentParser(description="WiFi Password Control Test")
+    parser.add_argument("password", nargs="?", default=None, help="WiFi password to set (plaintext), if not provided then query current password")
+    parser.add_argument("-p", "--port", default="COM10", help="Serial port number (default: COM10)")
+    parser.add_argument("-b", "--baudrate", type=int, default=38400, help="Baud rate (default: 38400)")
+    parser.add_argument("-t", "--timeout", type=float, default=5.0, help="Timeout in seconds (default: 5.0)")
 
     args = parser.parse_args()
 
     print("=" * 50)
-    print("WiFi密码控制功能测试")
+    print("WiFi Password Control Test")
     print("=" * 50)
-    print(f"串口: {args.port}")
-    print(f"波特率: {args.baudrate}")
+    print(f"Serial Port: {args.port}")
+    print(f"Baud Rate: {args.baudrate}")
     if args.password:
-        print(f"操作: 设置密码 -> {args.password}")
+        print(f"Operation: Set password -> {args.password}")
     else:
-        print(f"操作: 查询密码")
+        print(f"Operation: Query password")
     print("=" * 50)
 
     result = test_wifi_password(args.port, args.baudrate, args.password, args.timeout)
 
     if result:
-        print("\n[结果] 操作成功!")
+        print("\n[Result] Operation successful!")
     else:
-        print("\n[结果] 操作失败!")
+        print("\n[Result] Operation failed!")
 
 
 if __name__ == "__main__":

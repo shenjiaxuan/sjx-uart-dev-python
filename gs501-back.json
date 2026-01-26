@@ -61,7 +61,7 @@
         "PassThAttr": "620-689, 700-713",
         "ImageAttr": "624-689,700-713",
         "Cam1SetAttr": "620",
-        "Cam2SetAtt": "621",
+        "Cam2SetAttr": "621",
         "AIProcessAttr": "622-623"
     }
 }

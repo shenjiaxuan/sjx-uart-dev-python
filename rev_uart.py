@@ -89,15 +89,17 @@ if __name__ == '__main__':
         "Profile|",
         "WiFi|1",
         "WiFi|",
+        "WFPW|",
         "?ERR",
         # "REACT|1",
         "REACT|",
-        "BLK|",      # 设置图像块数量
+        "BLK|",      # 读取图像块数量
         "?OBdata",
         "?PS1",
         "?PS2",
         "?PS3",
-        "?PS4"
+        "?PS4",
+        "BLK|"
         # ?PS5 开始的图像块将动态请求
     ]
 
