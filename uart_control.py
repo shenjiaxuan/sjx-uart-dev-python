@@ -1036,7 +1036,7 @@ def handle_sdk_client_connection(client_socket, client_address):
                     camera_id = message.get("camera_id", "unknown")
 
                     # 处理 SPEED 事件
-                    if event_type == "SPEED":
+                    if event_type == "TRFFSPED":
                         cds_data = message.get("cds_data", {})
                         outputs = cds_data.get("outputs", [])
 
