@@ -2228,7 +2228,7 @@ def main():
                         # 不符合条件时发送空字典
                         response = json.dumps({})
                     uart.send_serial(response)
-                elif index >= 5 and index < (5 + max_image_blocks):  # 从index=5开始处理图像块，动态范围
+                elif index >= 5 and index < (5 + 80):  # 从index=5开始处理图像块，上限固定为最大支持值80
                     block_index = index - 5  # 计算实际的数组索引
 
                     if block_index < len(str_image):
